@@ -1,0 +1,64 @@
+.memo-waveform-player-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+.memo-waveform-player__waveform {
+  width: 100%;
+}
+
+.memo-waveform-player__waveform wave,
+.memo-waveform-player__waveform > div {
+  width: 100% !important;
+}
+
+.memo-waveform-player__volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgb(0 0 0 / 0.12);
+  outline: none;
+}
+
+html.dark .memo-waveform-player__volume-slider {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.memo-waveform-player__volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #000;
+  cursor: pointer;
+}
+
+html.dark .memo-waveform-player__volume-slider::-webkit-slider-thumb {
+  background: #fff;
+}
+
+.memo-waveform-player__volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: #000;
+  cursor: pointer;
+}
+
+html.dark .memo-waveform-player__volume-slider::-moz-range-thumb {
+  background: #fff;
+}
+
+@media (max-width: 639px) {
+  .memo-waveform-player__play-btn {
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+
+  .memo-waveform-player__waveform {
+    min-height: 56px;
+  }
+}

@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-aLt.woff2);
+  font-weight: 300;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-aLt.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-bRg.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-cBd.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-dEb.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-eHv.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeo-Variable.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-bRg.woff2);
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-cBd.woff2);
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-dEb.woff2);
+  font-weight: 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NanumSquareNeo';
+  src: url(https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-eHv.woff2);
+  font-weight: 900;
+  font-display: swap;
+}
+
+* {
+  font-family: 'NanumSquareNeo', sans-serif;
+}
+
+html {
+  background-color: #fff;
+  color: #000;
+}
+
+html.dark {
+  background-color: #000;
+  color: #fff;
+}
+
+body {
+  background-color: inherit;
+  color: inherit;
+}
+
+[data-sonner-toaster] {
+  --normal-bg: #fff;
+  --normal-border: rgb(0 0 0 / 0.2);
+  --normal-text: #000;
+  --success-bg: #fff;
+  --success-border: rgb(0 0 0 / 0.2);
+  --success-text: #000;
+  --error-bg: #fff;
+  --error-border: rgb(0 0 0 / 0.2);
+  --error-text: #000;
+  --info-bg: #fff;
+  --info-border: rgb(0 0 0 / 0.2);
+  --info-text: #000;
+  --warning-bg: #fff;
+  --warning-border: rgb(0 0 0 / 0.2);
+  --warning-text: #000;
+}
+
+html.dark [data-sonner-toaster] {
+  --normal-bg: #000;
+  --normal-border: rgb(255 255 255 / 0.2);
+  --normal-text: #fff;
+  --success-bg: #000;
+  --success-border: rgb(255 255 255 / 0.2);
+  --success-text: #fff;
+  --error-bg: #000;
+  --error-border: rgb(255 255 255 / 0.2);
+  --error-text: #fff;
+  --info-bg: #000;
+  --info-border: rgb(255 255 255 / 0.2);
+  --info-text: #fff;
+  --warning-bg: #000;
+  --warning-border: rgb(255 255 255 / 0.2);
+  --warning-text: #fff;
+}
+
+[data-sonner-toast] {
+  box-shadow: none !important;
+}
+
+[data-sonner-toast] [data-icon] svg {
+  color: #000 !important;
+}
+
+html.dark [data-sonner-toast] [data-icon] svg {
+  color: #fff !important;
+}
