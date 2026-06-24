@@ -1,6 +1,13 @@
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 import MembershipPromo from '../components/Membership/MembershipPromo'
+import { useUsageStore, type PlanType } from '../stores/usageStore'
+
+const planIdByName: Record<string, PlanType> = {
+  Free: 'free',
+  Basic: 'basic',
+  Pro: 'pro',
+}
 
 const plans = [
   {
@@ -36,6 +43,16 @@ const plans = [
 ]
 
 const MembershipPage = () => {
+  const currentPlan = useUsageStore((state) => state.plan)
+
+  const getPlanButtonLabel = (planName: string) => {
+    const planId = planIdByName[planName]
+    if (planId === currentPlan) return '현재 플랜'
+    return '업그레이드 (준비 중)'
+  }
+
+  const isCurrentPlan = (planName: string) => planIdByName[planName] === currentPlan
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -122,13 +139,23 @@ const MembershipPage = () => {
 
             <button
               type="button"
+              disabled
+              title={
+                isCurrentPlan(plan.name)
+                  ? undefined
+                  : '결제 기능은 준비 중입니다.'
+              }
               className={`mt-7 w-full rounded-lg border py-3 text-base font-medium transition-colors ${
-                plan.highlighted
-                  ? 'border-white bg-white text-black hover:bg-black hover:text-white dark:border-black dark:bg-black dark:text-white dark:hover:bg-white dark:hover:text-black'
-                  : 'border-black bg-black text-white hover:bg-white hover:text-black dark:border-white dark:bg-white dark:text-black dark:hover:bg-black dark:hover:text-white'
+                isCurrentPlan(plan.name)
+                  ? plan.highlighted
+                    ? 'cursor-default border-white/40 bg-white/10 text-white dark:border-black/20 dark:bg-black/5 dark:text-black'
+                    : 'cursor-default border-black/20 bg-black/5 text-black/60 dark:border-white/20 dark:bg-white/5 dark:text-white/60'
+                  : plan.highlighted
+                    ? 'cursor-not-allowed border-white/40 bg-white/10 text-white/70 opacity-80 dark:border-black/20 dark:bg-black/5 dark:text-black/60'
+                    : 'cursor-not-allowed border-black/20 bg-black/5 text-black/50 opacity-80 dark:border-white/20 dark:bg-white/5 dark:text-white/50'
               }`}
             >
-              {plan.name === 'Free' ? '현재 플랜' : '업그레이드'}
+              {getPlanButtonLabel(plan.name)}
             </button>
           </div>
         ))}

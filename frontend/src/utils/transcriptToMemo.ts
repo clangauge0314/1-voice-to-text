@@ -322,31 +322,28 @@ export function applyWordSplitWithSegments(
 }
 
 export function findActiveWordIndex(words: MemoWord[], currentTime: number): number {
-  if (!words.length) return -1
-
-  let activeIndex = -1
+  if (!words.length || currentTime < 0) return -1
 
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index]
-    if (word.start == null) continue
-
-    if (currentTime >= word.start) {
-      activeIndex = index
-      continue
+    if (word.start == null || word.end == null) continue
+    if (currentTime >= word.start && currentTime < word.end) {
+      return index
     }
-
-    break
   }
 
-  if (activeIndex !== -1) return activeIndex
+  let fallbackIndex = -1
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    if (word.start == null) continue
+    if (currentTime >= word.start) {
+      fallbackIndex = index
+    } else {
+      break
+    }
+  }
 
-  return words.findIndex(
-    (word) =>
-      word.start != null &&
-      word.end != null &&
-      currentTime >= word.start &&
-      currentTime < word.end,
-  )
+  return fallbackIndex
 }
 
 export function buildReadableContentFromWords(words: MemoWord[]): string {

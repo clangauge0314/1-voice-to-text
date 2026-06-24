@@ -1,6 +1,8 @@
 import { Loader2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useWordNoteAi } from '../../hooks/useWordNoteAi'
 import { formatAiNotes, useUsageStore } from '../../stores/usageStore'
+import AiNoteSuggestionBanner from './AiNoteSuggestionBanner'
 import WordNoteAiButton from './WordNoteAiButton'
 
 interface WordNoteMemoFieldProps {
@@ -14,12 +16,16 @@ interface WordNoteMemoFieldProps {
   isSaving?: boolean
   className?: string
   textareaClassName?: string
+  pendingAiNote?: string | null
+  onAiGenerated?: (note: string) => void
+  onApplyAiNote?: () => void
+  onDismissAiNote?: () => void
 }
 
 const WordNoteMemoField = ({
   memoId,
   wordIndex,
-  word,
+  word: _word,
   value,
   onChange,
   onBlur,
@@ -27,8 +33,15 @@ const WordNoteMemoField = ({
   isSaving = false,
   className = '',
   textareaClassName = '',
+  pendingAiNote = null,
+  onAiGenerated,
+  onApplyAiNote,
+  onDismissAiNote,
 }: WordNoteMemoFieldProps) => {
-  const { isGenerating, handleGenerate } = useWordNoteAi(memoId, wordIndex, word)
+  const { isGenerating, handleGenerate } = useWordNoteAi(memoId, wordIndex, {
+    currentNote: value,
+    onAiGenerated,
+  })
   const usedAiNotes = useUsageStore((state) => state.usedAiNotes)
   const totalAiNotes = useUsageStore((state) => state.totalAiNotes)
   const remainingAiNotes = useUsageStore((state) => state.remainingAiNotes)
@@ -40,17 +53,40 @@ const WordNoteMemoField = ({
         <span className="text-[10px] font-medium uppercase tracking-wide text-black/40 dark:text-white/40">
           메모
         </span>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] tabular-nums text-black/45 dark:text-white/45">
-            AI {formatAiNotes(usedAiNotes)}/{formatAiNotes(totalAiNotes)}
-          </span>
-          <WordNoteAiButton
-            isLoading={isGenerating}
-            disabled={isSaving || aiLimitReached}
-            onClick={() => void handleGenerate()}
-          />
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] tabular-nums text-black/45 dark:text-white/45">
+              AI {formatAiNotes(usedAiNotes)}/{formatAiNotes(totalAiNotes)}
+            </span>
+            <WordNoteAiButton
+              isLoading={isGenerating}
+              disabled={isSaving || aiLimitReached}
+              title={
+                aiLimitReached
+                  ? '이번 달 AI 메모를 모두 사용했습니다'
+                  : 'AI가 문장 맥락을 읽고 메모 작성'
+              }
+              onClick={() => void handleGenerate()}
+            />
+          </div>
+          {aiLimitReached && (
+            <Link
+              to="/membership"
+              className="text-[10px] font-medium text-black/55 underline underline-offset-2 transition-colors hover:text-black dark:text-white/55 dark:hover:text-white"
+            >
+              AI 메모 한도 초과 · 플랜 보기
+            </Link>
+          )}
         </div>
       </div>
+
+      {pendingAiNote && onApplyAiNote && onDismissAiNote && (
+        <AiNoteSuggestionBanner
+          preview={pendingAiNote}
+          onApply={onApplyAiNote}
+          onDismiss={onDismissAiNote}
+        />
+      )}
 
       <div className="relative">
         <textarea

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ErrorBoundary } from '../components/ErrorBoundary'
+import MemoExportButton from '../components/MemoExport/MemoExportButton'
 import MemoPageShell from '../components/RightSidebar/MemoPageShell'
 import MemoAudioPlayer from '../components/MemoWaveformPlayer/MemoWaveformPlayer'
 import MemoTranscriptEditor from '../components/MemoTranscriptEditor/MemoTranscriptEditor'
@@ -229,15 +230,18 @@ const MemoPage = () => {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => void handleDelete()}
-          disabled={isDeleting}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-red-500/30 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-500 hover:text-white disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-500 dark:hover:text-white"
-        >
-          {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-          삭제
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <MemoExportButton memo={memo} disabled={!hasTranscript} />
+          <button
+            type="button"
+            onClick={() => void handleDelete()}
+            disabled={isDeleting}
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-red-500/30 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-500 hover:text-white disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-500 dark:hover:text-white"
+          >
+            {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            삭제
+          </button>
+        </div>
       </div>
 
       {(durationLabel ||

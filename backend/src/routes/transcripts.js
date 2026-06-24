@@ -36,7 +36,7 @@ async function billTranscriptionIfNeeded({ user, upload, transcript, transcriptC
 }
 
 async function respondWithTranscript(res, statusCode, upload, transcript, user) {
-  await ensureMemoForTranscript({
+  const memo = await ensureMemoForTranscript({
     userId: transcript.user,
     upload,
     transcript,
@@ -46,6 +46,7 @@ async function respondWithTranscript(res, statusCode, upload, transcript, user) 
 
   return res.status(statusCode).json({
     ...toTranscriptResponse(transcript),
+    memoId: memo?._id?.toString(),
     usage: billedUser ? toUsageResponse(billedUser) : undefined,
   })
 }

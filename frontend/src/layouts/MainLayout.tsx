@@ -30,7 +30,7 @@ const MainLayout = () => {
       <AppToaster />
       <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
         <Navbar />
-        <main className="min-h-0 flex-1 overflow-hidden">
+        <main className="scrollbar-modern min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <Outlet />
         </main>
         <ThemeToggle />

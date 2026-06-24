@@ -91,6 +91,7 @@ export interface UploadResponse {
 export interface TranscriptResponse {
   id: string
   uploadId: string
+  memoId?: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   content: unknown
   error: string | null

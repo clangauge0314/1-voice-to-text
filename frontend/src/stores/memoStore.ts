@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { toast } from 'sonner'
 import {
   deleteMemo as deleteMemoApi,
   fetchMemo,
@@ -10,6 +11,7 @@ import {
   type MemoSegmentResponse,
   type MemoWordResponse,
 } from '../lib/api'
+import { syncSegmentTextsFromWords } from '../utils/transcriptToMemo'
 import { useUsageStore } from './usageStore'
 
 export interface MemoSegment {
@@ -156,6 +158,19 @@ function mergeMemoList(existingMemos: Memo[], incomingMemos: Memo[]): Memo[] {
   })
 }
 
+const memoSaveQueue = new Map<string, Promise<void>>()
+
+async function enqueueMemoSave(id: string, task: () => Promise<void>) {
+  const pending = memoSaveQueue.get(id) ?? Promise.resolve()
+  const next = pending.then(task, task).finally(() => {
+    if (memoSaveQueue.get(id) === next) {
+      memoSaveQueue.delete(id)
+    }
+  })
+  memoSaveQueue.set(id, next)
+  return next
+}
+
 export const useMemoStore = create<MemoState>()((set, get) => ({
   memos: [],
   selectedMemoId: null,
@@ -184,6 +199,11 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
       const { memos } = await fetchMemos()
       const incoming = memos.map(mapMemoResponse)
       set({ memos: mergeMemoList(get().memos, incoming) })
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : '메모 목록을 불러오지 못했습니다.',
+      )
+      throw err
     } finally {
       set({ loading: false })
     }
@@ -205,27 +225,29 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
   },
   saveMemoWords: async (id, words) => {
     const memo = getMemoById(id, get().memos)
-    const segments = memo?.segments ?? []
+    const segments = syncSegmentTextsFromWords(memo?.segments ?? [], words)
     await get().saveMemoContent(id, { words, segments })
   },
   saveMemoContent: async (id, content) => {
-    const memo = await saveMemoContentApi(id, content)
-    const savedWords = memo.words?.map((word, index) => ({
-      id: word.id ?? index,
-      word: word.word,
-      start: word.start,
-      end: word.end,
-      speaker: word.speaker ?? undefined,
-      note: word.note?.trim() || undefined,
-    }))
-    const savedSegments = mapMemoSegments(memo.segments)
-    get().updateMemo(id, {
-      words: savedWords,
-      segments: savedSegments,
-      preview: memo.preview,
-      segmentCount: memo.segmentCount ?? savedSegments?.length ?? undefined,
-      content: (savedWords ?? content.words).map((word) => word.word).join(' '),
-      updatedAt: formatUpdatedAt(memo.updatedAt),
+    await enqueueMemoSave(id, async () => {
+      const memo = await saveMemoContentApi(id, content)
+      const savedWords = memo.words?.map((word, index) => ({
+        id: word.id ?? index,
+        word: word.word,
+        start: word.start,
+        end: word.end,
+        speaker: word.speaker ?? undefined,
+        note: word.note?.trim() || undefined,
+      }))
+      const savedSegments = mapMemoSegments(memo.segments)
+      get().updateMemo(id, {
+        words: savedWords,
+        segments: savedSegments,
+        preview: memo.preview,
+        segmentCount: memo.segmentCount ?? savedSegments?.length ?? undefined,
+        content: (savedWords ?? content.words).map((word) => word.word).join(' '),
+        updatedAt: formatUpdatedAt(memo.updatedAt),
+      })
     })
   },
   generateWordAiNote: async (id, wordIndex) => {

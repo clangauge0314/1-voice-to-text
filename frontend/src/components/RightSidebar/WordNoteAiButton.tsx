@@ -3,6 +3,7 @@ import { Loader2, Sparkles } from 'lucide-react'
 interface WordNoteAiButtonProps {
   isLoading?: boolean
   disabled?: boolean
+  title?: string
   className?: string
   onClick: () => void
 }
@@ -10,6 +11,7 @@ interface WordNoteAiButtonProps {
 const WordNoteAiButton = ({
   isLoading = false,
   disabled = false,
+  title,
   className = '',
   onClick,
 }: WordNoteAiButtonProps) => (
@@ -17,7 +19,7 @@ const WordNoteAiButton = ({
     type="button"
     onClick={onClick}
     disabled={disabled || isLoading}
-    title="AI가 문장 맥락을 읽고 메모 작성"
+    title={title}
     aria-label="AI 메모 작성"
     className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border border-black/15 px-2 py-1 text-[11px] font-medium text-black/70 transition-colors hover:border-black/30 hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:text-white/70 dark:hover:border-white/30 dark:hover:bg-white dark:hover:text-black ${className}`}
   >

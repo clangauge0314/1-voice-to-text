@@ -108,9 +108,6 @@ const WordDetailTooltip = ({ word, speakers, anchorRef, visible }: WordDetailToo
       mono: true,
     },
     { label: '화자', value: speakerLabel },
-    ...(word.note?.trim()
-      ? [{ label: '메모', value: word.note.trim() }]
-      : []),
     { label: 'ID', value: String(word.id), mono: true },
   ]
 

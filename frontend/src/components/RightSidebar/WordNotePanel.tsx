@@ -12,9 +12,23 @@ import {
   formatSpeakerLabel,
   splitWordAtIndex,
 } from '../../utils/transcriptToMemo'
+import { useWordNoteDraft } from '../../hooks/useWordNoteDraft'
 import WordNoteMemoField from './WordNoteMemoField'
+import VirtualWordNoteList, {
+  VIRTUAL_SCROLL_THRESHOLD,
+  type VirtualWordNoteListHandle,
+} from './VirtualWordNoteList'
 
-const NOTE_SAVE_DELAY_MS = 600
+function getDefaultOpenIndices(words: MemoWord[]) {
+  const hasAnyNote = words.some((word) => Boolean(word.note?.trim()))
+  if (!hasAnyNote) return new Set<number>()
+
+  const open = new Set<number>()
+  words.forEach((word, index) => {
+    if (word.note?.trim()) open.add(index)
+  })
+  return open
+}
 
 const EditableWordLabel = ({
   memoId,
@@ -124,65 +138,16 @@ const PlaybackTextarea = ({
   wordIndex: number
   word: MemoWord
 }) => {
-  const saveWordNote = useMemoStore((state) => state.saveWordNote)
-  const [draft, setDraft] = useState(word.note ?? '')
-  const [isSaving, setIsSaving] = useState(false)
-  const saveTimerRef = useRef<number | null>(null)
-  const lastSavedRef = useRef(word.note ?? '')
-
-  useEffect(() => {
-    const nextNote = word.note ?? ''
-    setDraft(nextNote)
-    lastSavedRef.current = nextNote
-  }, [word.note, wordIndex])
-
-  const flushSave = useCallback(
-    async (value: string) => {
-      if (value === lastSavedRef.current) return
-
-      setIsSaving(true)
-      try {
-        await saveWordNote(memoId, wordIndex, value)
-        lastSavedRef.current = value.trim()
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : '단어 메모 저장에 실패했습니다.')
-      } finally {
-        setIsSaving(false)
-      }
-    },
-    [memoId, saveWordNote, wordIndex],
-  )
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
-      }
-    }
-  }, [])
-
-  const scheduleSave = (value: string) => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-    }
-
-    saveTimerRef.current = window.setTimeout(() => {
-      void flushSave(value)
-    }, NOTE_SAVE_DELAY_MS)
-  }
-
-  const handleChange = (value: string) => {
-    setDraft(value)
-    scheduleSave(value)
-  }
-
-  const handleBlur = () => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    void flushSave(draft)
-  }
+  const {
+    draft,
+    isSaving,
+    pendingAiNote,
+    handleChange,
+    handleBlur,
+    handleAiGenerated,
+    applyPendingAiNote,
+    dismissPendingAiNote,
+  } = useWordNoteDraft(memoId, wordIndex, word.note)
 
   return (
     <WordNoteMemoField
@@ -196,6 +161,10 @@ const PlaybackTextarea = ({
       isSaving={isSaving}
       className="h-full"
       textareaClassName="min-h-[7rem] flex-1 resize-none"
+      pendingAiNote={pendingAiNote}
+      onAiGenerated={handleAiGenerated}
+      onApplyAiNote={applyPendingAiNote}
+      onDismissAiNote={dismissPendingAiNote}
     />
   )
 }
@@ -223,65 +192,16 @@ const WordNoteEditor = ({
   onToggle,
   editorRef,
 }: WordNoteEditorProps) => {
-  const saveWordNote = useMemoStore((state) => state.saveWordNote)
-  const [draft, setDraft] = useState(word.note ?? '')
-  const [isSaving, setIsSaving] = useState(false)
-  const saveTimerRef = useRef<number | null>(null)
-  const lastSavedRef = useRef(word.note ?? '')
-
-  useEffect(() => {
-    const nextNote = word.note ?? ''
-    setDraft(nextNote)
-    lastSavedRef.current = nextNote
-  }, [word.note, wordIndex])
-
-  const flushSave = useCallback(
-    async (value: string) => {
-      if (value === lastSavedRef.current) return
-
-      setIsSaving(true)
-      try {
-        await saveWordNote(memoId, wordIndex, value)
-        lastSavedRef.current = value.trim()
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : '단어 메모 저장에 실패했습니다.')
-      } finally {
-        setIsSaving(false)
-      }
-    },
-    [memoId, saveWordNote, wordIndex],
-  )
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
-      }
-    }
-  }, [])
-
-  const scheduleSave = (value: string) => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-    }
-
-    saveTimerRef.current = window.setTimeout(() => {
-      void flushSave(value)
-    }, NOTE_SAVE_DELAY_MS)
-  }
-
-  const handleChange = (value: string) => {
-    setDraft(value)
-    scheduleSave(value)
-  }
-
-  const handleBlur = () => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    void flushSave(draft)
-  }
+  const {
+    draft,
+    isSaving,
+    pendingAiNote,
+    handleChange,
+    handleBlur,
+    handleAiGenerated,
+    applyPendingAiNote,
+    dismissPendingAiNote,
+  } = useWordNoteDraft(memoId, wordIndex, word.note)
 
   const timeLabel =
     word.start != null || word.end != null
@@ -378,6 +298,10 @@ const WordNoteEditor = ({
                 onChange={handleChange}
                 onBlur={handleBlur}
                 isSaving={isSaving}
+                pendingAiNote={pendingAiNote}
+                onAiGenerated={handleAiGenerated}
+                onApplyAiNote={applyPendingAiNote}
+                onDismissAiNote={dismissPendingAiNote}
               />
             </div>
           </motion.div>
@@ -397,6 +321,7 @@ const WordNotePanel = () => {
   const selectedIndexSet = useMemo(() => new Set(selectedIndices), [selectedIndices])
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const virtualListRef = useRef<VirtualWordNoteListHandle>(null)
   const itemRefs = useRef(new Map<number, HTMLElement>())
   const prevSelectionScrollRef = useRef<number | null>(null)
   const prevWordsLengthRef = useRef(0)
@@ -429,8 +354,9 @@ const WordNotePanel = () => {
 
   useEffect(() => {
     setForceListView(false)
-    setOpenIndices(new Set(words.map((_, index) => index)))
+    setOpenIndices(getDefaultOpenIndices(words))
     prevWordsLengthRef.current = words.length
+    prevActiveWordRef.current = -1
   }, [memoId])
 
   useEffect(() => {
@@ -482,6 +408,11 @@ const WordNotePanel = () => {
   }
 
   const scrollActiveToCenter = useCallback((index: number, behavior: ScrollBehavior) => {
+    if (words.length >= VIRTUAL_SCROLL_THRESHOLD && virtualListRef.current) {
+      virtualListRef.current.scrollToIndex(index, behavior)
+      return
+    }
+
     const container = scrollContainerRef.current
     const element = itemRefs.current.get(index)
     if (!container || !element) return
@@ -494,7 +425,7 @@ const WordNotePanel = () => {
       top: Math.max(0, Math.min(targetScroll, maxScroll)),
       behavior,
     })
-  }, [])
+  }, [words.length])
 
   const justExitedLyricsMode = useRef(false)
 
@@ -571,38 +502,84 @@ const WordNotePanel = () => {
   }
 
   const noteCount = words.filter((word) => word.note?.trim()).length
+  const useVirtualList = words.length >= VIRTUAL_SCROLL_THRESHOLD
 
-  // 더 이상 필터링하지 않고 항상 전체 단어를 렌더링합니다
-  const renderWordItems = () =>
-    words.map((word, index) => {
+  const renderWordEditor = ({
+    word,
+    index,
+    speakerLabel,
+    isOpen,
+    isHighlighted,
+    isActive,
+    onToggle,
+    editorRef,
+  }: {
+    word: MemoWord
+    index: number
+    speakerLabel: string
+    isOpen: boolean
+    isHighlighted: boolean
+    isActive: boolean
+    onToggle: () => void
+    editorRef: (element: HTMLElement | null) => void
+  }) => (
+    <WordNoteEditor
+      key={`word-${word.id}-${index}`}
+      memoId={memoId}
+      wordIndex={index}
+      word={word}
+      speakerLabel={speakerLabel}
+      isOpen={isOpen}
+      isHighlighted={isHighlighted}
+      isActive={isActive}
+      onToggle={onToggle}
+      editorRef={editorRef}
+    />
+  )
+
+  const renderWordItems = () => {
+    if (useVirtualList) {
+      return (
+        <VirtualWordNoteList
+          ref={virtualListRef}
+          scrollContainerRef={scrollContainerRef}
+          words={words}
+          speakers={speakers}
+          openIndices={openIndices}
+          activeWordIndex={activeWordIndex}
+          selectedIndexSet={selectedIndexSet}
+          renderEditor={renderWordEditor}
+          onToggleWord={toggleWord}
+          itemRefs={itemRefs}
+        />
+      )
+    }
+
+    return words.map((word, index) => {
       const speakerIndex = speakers.indexOf(word.speaker ?? '')
       const speakerLabel = formatSpeakerLabel(
         word.speaker,
         speakerIndex >= 0 ? speakerIndex : 0,
       )
-      const isActive = index === activeWordIndex
 
-      return (
-        <WordNoteEditor
-          key={word.id || index}
-          memoId={memoId}
-          wordIndex={index}
-          word={word}
-          speakerLabel={speakerLabel}
-          isOpen={openIndices.has(index)}
-          isHighlighted={selectedIndexSet.has(index)}
-          isActive={isActive}
-          onToggle={() => toggleWord(index)}
-          editorRef={(element) => {
-            if (element) {
-              itemRefs.current.set(index, element)
-            } else {
-              itemRefs.current.delete(index)
-            }
-          }}
-        />
-      )
+      return renderWordEditor({
+        word,
+        index,
+        speakerLabel,
+        isOpen: openIndices.has(index),
+        isHighlighted: selectedIndexSet.has(index),
+        isActive: index === activeWordIndex,
+        onToggle: () => toggleWord(index),
+        editorRef: (element) => {
+          if (element) {
+            itemRefs.current.set(index, element)
+          } else {
+            itemRefs.current.delete(index)
+          }
+        },
+      })
     })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -697,7 +674,7 @@ const WordNotePanel = () => {
               <p className="text-sm text-black/50 dark:text-white/50">단어가 없습니다.</p>
             </div>
           ) : (
-            <div className="space-y-2 py-2">{renderWordItems()}</div>
+            <div className={useVirtualList ? '' : 'space-y-2 py-2'}>{renderWordItems()}</div>
           )}
         </div>
       )}

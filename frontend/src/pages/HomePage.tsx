@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Check, ChevronRight, FileAudio, Loader2, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { uploadAudio, startTranscription } from '../lib/api'
 import { useAuthModalStore } from '../stores/authModalStore'
@@ -177,6 +177,7 @@ const StageSteps = ({ step }: { step: ProcessStep }) => {
 
 const HomePage = () => {
   const inputRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const openLogin = useAuthModalStore((state) => state.openLogin)
   const loadMemos = useMemoStore((state) => state.loadMemos)
@@ -238,6 +239,9 @@ const HomePage = () => {
         setOverallProgress(PROGRESS.MEMO)
 
         await loadMemos()
+        const createdMemo = useMemoStore
+          .getState()
+          .memos.find((memo) => memo.uploadId === upload.id)
 
         setOverallProgress(PROGRESS.COMPLETE)
         setStep('complete')
@@ -247,6 +251,14 @@ const HomePage = () => {
             ? `${formatDurationSeconds(upload.duration)} 차감 · ${upload.format.toUpperCase()}`
             : upload.format.toUpperCase(),
         })
+
+        if (transcript.memoId) {
+          navigate(`/memo/${transcript.memoId}`)
+        } else if (createdMemo) {
+          navigate(`/memo/${createdMemo.id}`)
+        } else {
+          toast.info('메모가 생성되었습니다. 왼쪽 목록에서 열어주세요.')
+        }
       } catch (err) {
         setFileName(null)
         setStep('idle')
@@ -256,7 +268,7 @@ const HomePage = () => {
         resetInput()
       }
     },
-    [user, openLogin, loadMemos, setUsage],
+    [user, openLogin, loadMemos, setUsage, navigate],
   )
 
   const handleFile = useCallback(
