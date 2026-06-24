@@ -208,6 +208,119 @@ export function groupWordsBySegments(
   return groups
 }
 
+export function canMergeSelectedSegmentIndices(indices: number[]): boolean {
+  return canMergeSelectedIndices(indices)
+}
+
+export function mergeSegmentRange(segments: MemoSegment[], indices: number[]): MemoSegment[] {
+  if (!canMergeSelectedSegmentIndices(indices)) return segments
+
+  const sorted = [...indices].sort((a, b) => a - b)
+  const left = sorted[0]
+  const right = sorted[sorted.length - 1]
+  const slice = segments.slice(left, right + 1)
+
+  const merged: MemoSegment = {
+    start: slice[0].start ?? slice.find((segment) => segment.start != null)?.start,
+    end:
+      slice[slice.length - 1].end ??
+      [...slice].reverse().find((segment) => segment.end != null)?.end,
+    text: slice
+      .map((segment) => segment.text?.trim())
+      .filter(Boolean)
+      .join(' '),
+    speaker: slice[0].speaker ?? slice.find((segment) => segment.speaker)?.speaker,
+  }
+
+  const next = [...segments]
+  next.splice(left, sorted.length, merged)
+  return next
+}
+
+export function getSegmentIndicesForWordIndices(
+  segments: MemoSegment[],
+  words: MemoWord[],
+  wordIndices: number[],
+): number[] {
+  const groups = groupWordsBySegments(segments, words)
+  const found = new Set<number>()
+
+  wordIndices.forEach((wordIndex) => {
+    groups.forEach((group) => {
+      if (group.wordIndices.includes(wordIndex)) {
+        found.add(group.segmentIndex)
+      }
+    })
+  })
+
+  return [...found].sort((a, b) => a - b)
+}
+
+export function syncSegmentTextsFromWords(
+  segments: MemoSegment[],
+  words: MemoWord[],
+): MemoSegment[] {
+  if (!segments.length) return segments
+
+  const groups = groupWordsBySegments(segments, words)
+
+  return segments.map((segment, index) => {
+    const wordText = groups[index]?.wordIndices
+      .map((wordIndex) => words[wordIndex]?.word?.trim())
+      .filter(Boolean)
+      .join(' ')
+
+    return wordText ? { ...segment, text: wordText } : segment
+  })
+}
+
+export function applyWordMergeWithSegments(
+  segments: MemoSegment[],
+  words: MemoWord[],
+  indices: number[],
+): { segments: MemoSegment[]; words: MemoWord[] } {
+  if (!canMergeSelectedIndices(indices)) {
+    return { segments, words }
+  }
+
+  const nextWords = mergeWordRange(words, indices)
+  const segmentIndices = getSegmentIndicesForWordIndices(segments, words, indices)
+  let nextSegments = segments
+
+  if (segmentIndices.length > 1) {
+    nextSegments = mergeSegmentRange(segments, segmentIndices)
+  }
+
+  nextSegments = syncSegmentTextsFromWords(nextSegments, nextWords)
+  return { segments: nextSegments, words: nextWords }
+}
+
+export function mergeSelectedSegments(
+  segments: MemoSegment[],
+  words: MemoWord[],
+  segmentIndices: number[],
+): { segments: MemoSegment[]; words: MemoWord[] } {
+  if (!canMergeSelectedSegmentIndices(segmentIndices)) {
+    return { segments, words }
+  }
+
+  const nextSegments = syncSegmentTextsFromWords(
+    mergeSegmentRange(segments, segmentIndices),
+    words,
+  )
+
+  return { segments: nextSegments, words }
+}
+
+export function applyWordSplitWithSegments(
+  segments: MemoSegment[],
+  _words: MemoWord[],
+  nextWords: MemoWord[],
+): MemoSegment[] {
+  if (!segments.length) return segments
+  return syncSegmentTextsFromWords(segments, nextWords)
+}
+
 export function findActiveWordIndex(words: MemoWord[], currentTime: number): number {
   if (!words.length) return -1
 

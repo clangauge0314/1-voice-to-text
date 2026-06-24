@@ -8,8 +8,20 @@ import {
   deleteMemoResources,
   ensureMemoForTranscript,
 } from '../utils/memo.js'
-import { buildPreviewFromWords, extractMemoWords, normalizeMemoWord } from '../utils/memoWords.js'
+import { buildPreviewFromWords, extractMemoWords, normalizeMemoWord, normalizeWordNote } from '../utils/memoWords.js'
+import {
+  buildPreviewFromSegments,
+  extractMemoSegments,
+  normalizeMemoSegment,
+} from '../utils/memoSegments.js'
 import { toMemoResponse } from '../utils/serializers.js'
+import { generateWordNoteWithGemini } from '../utils/gemini.js'
+import {
+  assertAiNoteAvailable,
+  consumeAiNote,
+  ensureCurrentPeriod,
+  toUsageResponse,
+} from '../utils/usage.js'
 
 async function ensureMemoWordsFromTranscript(bundle) {
   if (Array.isArray(bundle.memo.words) && bundle.memo.words.length > 0) {
@@ -22,6 +34,20 @@ async function ensureMemoWordsFromTranscript(bundle) {
   bundle.memo.words = words
   bundle.memo.preview = buildPreviewFromWords(words)
   bundle.memo.markModified('words')
+  await bundle.memo.save()
+  return bundle.memo
+}
+
+async function ensureMemoSegmentsFromTranscript(bundle) {
+  if (Array.isArray(bundle.memo.segments) && bundle.memo.segments.length > 0) {
+    return bundle.memo
+  }
+
+  const segments = extractMemoSegments(bundle.transcript.content ?? {})
+  if (segments.length === 0) return bundle.memo
+
+  bundle.memo.segments = segments
+  bundle.memo.markModified('segments')
   await bundle.memo.save()
   return bundle.memo
 }
@@ -84,6 +110,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     }
 
     await ensureMemoWordsFromTranscript(bundle)
+    await ensureMemoSegmentsFromTranscript(bundle)
 
     res.json(toMemoResponse(bundle.memo, bundle.upload, bundle.transcript, { includeWords: true }))
   } catch (err) {
@@ -94,9 +121,9 @@ router.get('/:id', authMiddleware, async (req, res) => {
 
 router.patch('/:id', authMiddleware, async (req, res) => {
   try {
-    const { title, words } = req.body
+    const { title, words, segments } = req.body
 
-    if (title == null && words === undefined) {
+    if (title == null && words === undefined && segments === undefined) {
       return res.status(400).json({ error: '변경할 내용이 없습니다.' })
     }
 
@@ -134,12 +161,88 @@ router.patch('/:id', authMiddleware, async (req, res) => {
       bundle.memo.markModified('words')
     }
 
+    if (segments !== undefined) {
+      if (!Array.isArray(segments)) {
+        return res.status(400).json({ error: '문장 데이터 형식이 올바르지 않습니다.' })
+      }
+
+      bundle.memo.segments = segments
+        .map((segment, index) => normalizeMemoSegment(segment, index))
+        .filter(Boolean)
+
+      const previewText = buildPreviewFromSegments(bundle.memo.segments)
+      if (previewText) {
+        bundle.memo.preview = previewText
+      }
+
+      bundle.memo.markModified('segments')
+    }
+
     await bundle.memo.save()
 
     res.json(toMemoResponse(bundle.memo, bundle.upload, bundle.transcript, { includeWords: true }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: '메모 수정에 실패했습니다.' })
+  }
+})
+
+router.post('/:id/words/:wordIndex/ai-note', authMiddleware, async (req, res) => {
+  try {
+    const wordIndex = Number.parseInt(req.params.wordIndex, 10)
+    if (Number.isNaN(wordIndex) || wordIndex < 0) {
+      return res.status(400).json({ error: '단어 위치가 올바르지 않습니다.' })
+    }
+
+    const bundle = await loadMemoBundle(req.params.id, req.user._id)
+    if (!bundle) {
+      return res.status(404).json({ error: '메모를 찾을 수 없습니다.' })
+    }
+
+    await ensureMemoWordsFromTranscript(bundle)
+    await ensureMemoSegmentsFromTranscript(bundle)
+
+    const words = bundle.memo.words
+    if (!Array.isArray(words) || words.length === 0) {
+      return res.status(400).json({ error: '전사 단어가 없습니다.' })
+    }
+
+    if (wordIndex >= words.length) {
+      return res.status(400).json({ error: '단어 위치가 올바르지 않습니다.' })
+    }
+
+    const user = await ensureCurrentPeriod(req.user)
+    assertAiNoteAvailable(user)
+
+    const { note } = await generateWordNoteWithGemini({
+      words,
+      segments: bundle.memo.segments ?? [],
+      wordIndex,
+      transcriptContent: bundle.transcript.content ?? {},
+    })
+
+    const normalizedNote = normalizeWordNote(note)
+    if (!normalizedNote) {
+      return res.status(502).json({ error: 'AI가 유효한 메모를 생성하지 못했습니다.' })
+    }
+
+    bundle.memo.words = words.map((word, index) =>
+      index === wordIndex ? { ...word, note: normalizedNote } : word,
+    )
+    bundle.memo.markModified('words')
+    await bundle.memo.save()
+    await consumeAiNote(user)
+
+    res.json({
+      note: normalizedNote,
+      memo: toMemoResponse(bundle.memo, bundle.upload, bundle.transcript, { includeWords: true }),
+      usage: toUsageResponse(user),
+    })
+  } catch (err) {
+    console.error(err)
+    const message = err instanceof Error ? err.message : 'AI 메모 생성에 실패했습니다.'
+    const status = err.statusCode ?? (message.includes('GOOGLE_AI_API_KEY') ? 503 : 500)
+    res.status(status).json({ error: message })
   }
 })
 

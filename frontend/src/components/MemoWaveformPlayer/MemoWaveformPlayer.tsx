@@ -41,6 +41,7 @@ const MemoAudioPlayer = ({
 
   const token = useAuthStore((state) => state.token)
   const setIsPlaying = useMemoPlaybackStore((state) => state.setIsPlaying)
+  const pauseSignal = useMemoPlaybackStore((state) => state.pauseSignal)
   const authenticatedAudioUrl =
     audioUrl && token ? buildAuthenticatedAudioUrl(audioUrl, token) : ''
 
@@ -60,6 +61,19 @@ const MemoAudioPlayer = ({
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate
   }, [onTimeUpdate])
+
+  useEffect(() => {
+    if (pauseSignal === 0) return
+
+    const player = playerInstanceRef.current
+    if (!player) return
+
+    if (typeof player.pause === 'function') {
+      player.pause()
+    } else {
+      player.audio?.pause()
+    }
+  }, [pauseSignal])
 
   useEffect(() => {
     if (playerInstanceRef.current) {
@@ -118,7 +132,7 @@ const MemoAudioPlayer = ({
       player.audio.style.opacity = '0'
       containerRef.current.appendChild(player.audio)
 
-      player.audio.addEventListener('error', (e: any) => {
+      player.audio.addEventListener('error', () => {
         console.error('[Audio] Error:', player.audio?.error)
       })
     }
@@ -127,12 +141,20 @@ const MemoAudioPlayer = ({
     player.setVolume(isMutedRef.current ? 0 : volumeRef.current)
 
     seekRef.current = (time: number) => {
-      if (playerInstanceRef.current) {
-        playerInstanceRef.current.seekTo(time)
-        void playerInstanceRef.current.play()?.catch(() => {
-          toast.error('해당 위치로 이동할 수 없습니다.')
-        })
+      const player = playerInstanceRef.current
+      if (!player) return
+
+      player.seekTo(time)
+
+      if (typeof player.pause === 'function') {
+        player.pause()
+      } else {
+        player.audio?.pause()
       }
+
+      setIsPlaying(false)
+      setCurrentTime(time)
+      onTimeUpdateRef.current(time)
     }
 
     return () => {

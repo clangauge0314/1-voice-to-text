@@ -1,5 +1,6 @@
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, StickyNote } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronsDownUp, ChevronsUpDown, Loader2, StickyNote } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getMemoById, useMemoStore, type MemoWord } from '../../stores/memoStore'
@@ -9,9 +10,104 @@ import {
   findActiveWordIndex,
   formatPreciseTimestamp,
   formatSpeakerLabel,
+  splitWordAtIndex,
 } from '../../utils/transcriptToMemo'
+import WordNoteMemoField from './WordNoteMemoField'
 
 const NOTE_SAVE_DELAY_MS = 600
+
+const EditableWordLabel = ({
+  memoId,
+  wordIndex,
+  word,
+  className = '',
+}: {
+  memoId: string
+  wordIndex: number
+  word: MemoWord
+  className?: string
+}) => {
+  const memos = useMemoStore((state) => state.memos)
+  const saveMemoWords = useMemoStore((state) => state.saveMemoWords)
+  const [isEditing, setIsEditing] = useState(false)
+  const [wordDraft, setWordDraft] = useState(word.word)
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    if (!isEditing) {
+      setWordDraft(word.word)
+    }
+  }, [word.word, isEditing])
+
+  const commitWordEdit = async () => {
+    const trimmed = wordDraft.trim()
+    setIsEditing(false)
+
+    if (!trimmed || trimmed === word.word.trim()) {
+      setWordDraft(word.word)
+      return
+    }
+
+    const memo = getMemoById(memoId, memos)
+    const words = memo?.words
+    if (!words || wordIndex < 0 || wordIndex >= words.length) return
+
+    let nextWords = words.map((entry, index) =>
+      index === wordIndex ? { ...entry, word: trimmed } : entry,
+    )
+
+    if (/\s/.test(trimmed)) {
+      nextWords = splitWordAtIndex(nextWords, wordIndex)
+    }
+
+    setIsSaving(true)
+    try {
+      await saveMemoWords(memoId, nextWords)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '단어 수정에 실패했습니다.')
+      setWordDraft(word.word)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isEditing) {
+    return (
+      <input
+        value={wordDraft}
+        onChange={(event) => setWordDraft(event.target.value)}
+        onBlur={() => void commitWordEdit()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') void commitWordEdit()
+          if (event.key === 'Escape') {
+            setWordDraft(word.word)
+            setIsEditing(false)
+          }
+        }}
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        className={`w-full rounded border border-black/30 bg-white px-2 py-1 text-sm font-semibold text-black outline-none focus:border-black dark:border-white/30 dark:bg-black dark:text-white dark:focus:border-white ${className}`}
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <span
+      onDoubleClick={(event) => {
+        event.stopPropagation()
+        setWordDraft(word.word)
+        setIsEditing(true)
+      }}
+      className={`break-words [overflow-wrap:anywhere] ${className} ${
+        isSaving ? 'opacity-60' : 'cursor-text'
+      }`}
+      title="더블클릭하여 단어 수정"
+    >
+      {word.word}
+    </span>
+  )
+}
 
 function getScrollOffset(container: HTMLElement, element: HTMLElement) {
   const containerRect = container.getBoundingClientRect()
@@ -89,21 +185,18 @@ const PlaybackTextarea = ({
   }
 
   return (
-    <div className="relative flex h-full flex-col">
-      <textarea
-        value={draft}
-        onChange={(event) => handleChange(event.target.value)}
-        onBlur={handleBlur}
-        placeholder="이 단어에 대한 메모를 입력하세요"
-        className="scrollbar-modern w-full flex-1 resize-none rounded-md border border-black/15 bg-white px-2.5 py-2 text-sm leading-relaxed text-black outline-none transition-colors placeholder:text-black/35 focus:border-black/40 dark:border-white/15 dark:bg-black dark:text-white dark:placeholder:text-white/35 dark:focus:border-white/40"
-      />
-      {isSaving && (
-        <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-black/60 shadow-sm backdrop-blur-sm dark:bg-black/90 dark:text-white/60">
-          <Loader2 size={10} className="animate-spin" />
-          저장 중
-        </span>
-      )}
-    </div>
+    <WordNoteMemoField
+      memoId={memoId}
+      wordIndex={wordIndex}
+      word={word.word}
+      value={draft}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      rows={4}
+      isSaving={isSaving}
+      className="h-full"
+      textareaClassName="min-h-[7rem] flex-1 resize-none"
+    />
   )
 }
 
@@ -213,53 +306,83 @@ const WordNoteEditor = ({
             }`
       }`}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-start gap-2 p-3 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
-        aria-expanded={isOpen}
-      >
-        <span className="mt-0.5 shrink-0 text-black/40 dark:text-white/40">
-          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-black dark:text-white">{word.word}</span>
+      <div className="flex w-full items-start gap-2 p-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="mt-0.5 shrink-0 text-black/40 transition-colors hover:text-black dark:text-white/40 dark:hover:text-white"
+          aria-expanded={isOpen}
+          aria-label={isOpen ? '접기' : '펼치기'}
+        >
+          <motion.span
+            animate={{ rotate: isOpen ? 0 : -90 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="inline-flex"
+          >
+            <ChevronDown size={14} />
+          </motion.span>
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start gap-2">
+            <EditableWordLabel
+              memoId={memoId}
+              wordIndex={wordIndex}
+              word={word}
+              className="text-sm font-semibold text-black dark:text-white"
+            />
             {hasNote && !isOpen && (
               <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
                 메모
               </span>
             )}
-          </span>
-          <span className="mt-0.5 block text-[10px] text-black/45 dark:text-white/45">
-            {metaParts.join(' · ')}
-          </span>
-          {!isOpen && hasNote && (
-            <span className="mt-1 line-clamp-2 text-xs text-black/55 dark:text-white/55">
-              {word.note?.trim()}
+          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            className="mt-0.5 block w-full text-left transition-colors hover:opacity-80"
+          >
+            <span className="block text-[10px] text-black/45 dark:text-white/45">
+              {metaParts.join(' · ')}
             </span>
-          )}
-        </span>
+            {!isOpen && hasNote && (
+              <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-black/55 [overflow-wrap:anywhere] dark:text-white/55">
+                {word.note?.trim()}
+              </span>
+            )}
+          </button>
+        </div>
         {isSaving && (
           <span className="flex shrink-0 items-center gap-1 text-[10px] text-black/45 dark:text-white/45">
             <Loader2 size={11} className="animate-spin" />
             저장 중
           </span>
         )}
-      </button>
+      </div>
 
-      {isOpen && (
-        <div className="border-t border-black/10 px-3 pb-3 pt-2 dark:border-white/10">
-          <textarea
-            value={draft}
-            onChange={(event) => handleChange(event.target.value)}
-            onBlur={handleBlur}
-            placeholder="이 단어에 대한 메모를 입력하세요"
-            rows={2}
-            className="scrollbar-modern w-full resize-y rounded-md border border-black/15 bg-white px-2.5 py-2 text-sm leading-relaxed text-black outline-none transition-colors placeholder:text-black/35 focus:border-black/40 dark:border-white/15 dark:bg-black dark:text-white dark:placeholder:text-white/35 dark:focus:border-white/40"
-          />
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="memo-field"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden border-t border-black/10 dark:border-white/10"
+          >
+            <div className="px-3 pb-3 pt-2">
+              <WordNoteMemoField
+                memoId={memoId}
+                wordIndex={wordIndex}
+                word={word.word}
+                value={draft}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                isSaving={isSaving}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </article>
   )
 }
@@ -282,6 +405,8 @@ const WordNotePanel = () => {
 
   const currentTime = useMemoPlaybackStore((state) => state.currentTime)
   const isPlaying = useMemoPlaybackStore((state) => state.isPlaying)
+  const requestPause = useMemoPlaybackStore((state) => state.requestPause)
+  const [forceListView, setForceListView] = useState(false)
   const memo = memoId ? getMemoById(memoId, memos) : undefined
   const words = memo?.words ?? []
   const speakers = memo?.speakers ?? []
@@ -291,12 +416,28 @@ const WordNotePanel = () => {
     [words, currentTime],
   )
 
-  const isLyricsMode = isPlaying
+  const isLyricsMode = isPlaying && !forceListView
+
+  const showFullList = () => {
+    setForceListView(true)
+    requestPause()
+  }
+
+  const showCurrentWord = () => {
+    setForceListView(false)
+  }
 
   useEffect(() => {
+    setForceListView(false)
     setOpenIndices(new Set(words.map((_, index) => index)))
     prevWordsLengthRef.current = words.length
   }, [memoId])
+
+  useEffect(() => {
+    if (isPlaying) {
+      setForceListView(false)
+    }
+  }, [isPlaying])
 
   useEffect(() => {
     const prevLength = prevWordsLengthRef.current
@@ -484,7 +625,7 @@ const WordNotePanel = () => {
             {isLyricsMode ? (
               <button
                 type="button"
-                onClick={() => setForceListView(true)}
+                onClick={showFullList}
                 className="flex h-6 items-center justify-center rounded border border-black/15 px-2 text-[10px] font-medium text-black/60 transition-colors hover:border-black/30 hover:text-black dark:border-white/15 dark:text-white/60 dark:hover:border-white/30 dark:hover:text-white"
               >
                 전체 목록 보기
@@ -492,7 +633,7 @@ const WordNotePanel = () => {
             ) : isPlaying ? (
               <button
                 type="button"
-                onClick={() => setForceListView(false)}
+                onClick={showCurrentWord}
                 className="flex h-6 items-center justify-center rounded border border-black/15 px-2 text-[10px] font-medium text-black/60 transition-colors hover:border-black/30 hover:text-black dark:border-white/15 dark:text-white/60 dark:hover:border-white/30 dark:hover:text-white"
               >
                 현재 단어 보기
@@ -523,10 +664,13 @@ const WordNotePanel = () => {
                       재생 중
                     </span>
                   </div>
-                  <p className="mt-3 truncate text-xl font-bold text-black dark:text-white">
-                    {activeWord.word}
-                  </p>
-                  <p className="mt-1 truncate text-xs text-black/45 dark:text-white/45">
+                  <EditableWordLabel
+                    memoId={memoId}
+                    wordIndex={activeWordIndex}
+                    word={activeWord}
+                    className="mt-3 block text-xl font-bold text-black dark:text-white"
+                  />
+                  <p className="mt-1 break-words text-xs text-black/45 dark:text-white/45">
                     {[`#${activeWordIndex + 1}`, formatSpeakerLabel(activeWord.speaker, speakers.indexOf(activeWord.speaker ?? '') >= 0 ? speakers.indexOf(activeWord.speaker ?? '') : 0), activeWord.start != null || activeWord.end != null ? `${formatPreciseTimestamp(activeWord.start)} – ${formatPreciseTimestamp(activeWord.end)}` : null].filter(Boolean).join(' · ')}
                   </p>
                 </div>

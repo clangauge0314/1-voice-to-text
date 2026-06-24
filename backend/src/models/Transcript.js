@@ -17,6 +17,7 @@ const transcriptSchema = new mongoose.Schema(
     },
     content: { type: mongoose.Schema.Types.Mixed, default: null },
     error: { type: String, default: null },
+    billedSeconds: { type: Number, default: null, min: 0 },
   },
   { timestamps: true },
 )

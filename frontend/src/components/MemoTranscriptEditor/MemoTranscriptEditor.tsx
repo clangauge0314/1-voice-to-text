@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Merge, Scissors, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { MemoSegment, MemoWord } from '../../stores/memoStore'
 import { useWordSelectionStore } from '../../stores/wordSelectionStore'
 import {
+  applyWordMergeWithSegments,
+  applyWordSplitWithSegments,
   canMergeSelectedIndices,
+  canMergeSelectedSegmentIndices,
   canSplitSelectedIndices,
   findActiveSegmentIndex,
   findActiveWordIndex,
@@ -14,11 +17,30 @@ import {
   formatTimestamp,
   getSpeakerColor,
   groupWordsBySegments,
-  mergeWordRange,
+  mergeSelectedSegments,
   splitWordAtIndex,
   splitWordsAtIndices,
+  syncSegmentTextsFromWords,
   SPEAKER_COLORS,
 } from '../../utils/transcriptToMemo'
+
+function shouldSelectOnClick(
+  event: { ctrlKey: boolean; metaKey: boolean; pointerType?: string },
+  isCoarsePointer: boolean,
+) {
+  if (event.pointerType === 'touch') return true
+  if (isCoarsePointer) return true
+  return event.ctrlKey || event.metaKey
+}
+
+function shouldSelectOnPointerDown(
+  event: { ctrlKey: boolean; metaKey: boolean; pointerType: string },
+  isCoarsePointer: boolean,
+) {
+  if (event.pointerType === 'touch') return true
+  if (isCoarsePointer && event.pointerType !== 'mouse') return true
+  return event.ctrlKey || event.metaKey
+}
 
 interface ContextMenuState {
   x: number
@@ -100,7 +122,7 @@ const WordDetailTooltip = ({ word, speakers, anchorRef, visible }: WordDetailToo
       style={{ top: position.top, left: position.left }}
       role="tooltip"
     >
-      <p className="mb-2 border-b border-black/8 pb-2 text-sm font-semibold text-black dark:border-white/10 dark:text-white">
+      <p className="mb-2 break-words border-b border-black/8 pb-2 text-sm font-semibold [overflow-wrap:anywhere] text-black dark:border-white/10 dark:text-white">
         {word.word}
       </p>
       <dl className="space-y-1.5">
@@ -260,7 +282,7 @@ interface WordChipProps {
   onStartEdit: () => void
   onClick: (event: MouseEvent<HTMLButtonElement>) => void
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void
-  onPointerDown: () => void
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void
   onPointerEnter: () => void
   onPointerUp: () => void
 }
@@ -299,7 +321,8 @@ const WordChip = ({
           if (event.key === 'Enter') void onCommit()
           if (event.key === 'Escape') onCancel()
         }}
-        className="inline w-24 rounded border border-black/30 bg-transparent px-1.5 py-0.5 text-sm text-black outline-none focus:border-black dark:border-white/30 dark:text-white dark:focus:border-white"
+        size={Math.max(draft.length, word.word.length, 8)}
+        className="inline max-w-full rounded border border-black/30 bg-transparent px-1.5 py-0.5 text-sm text-black outline-none focus:border-black dark:border-white/30 dark:text-white dark:focus:border-white"
         autoFocus
       />
     )
@@ -308,7 +331,7 @@ const WordChip = ({
   return (
     <span
       ref={anchorRef}
-      className="relative inline-flex"
+      className="relative inline-flex max-w-full"
       onMouseEnter={() => setTooltipVisible(true)}
       onMouseLeave={() => setTooltipVisible(false)}
     >
@@ -320,19 +343,19 @@ const WordChip = ({
       />
       <button
         type="button"
-        onMouseDown={(event) => {
+        onPointerDown={(event) => {
           if (event.button !== 0 || !canEdit) return
           event.preventDefault()
-          onPointerDown()
+          onPointerDown(event)
         }}
-        onMouseUp={onPointerUp}
-        onMouseEnter={onPointerEnter}
+        onPointerUp={onPointerUp}
+        onPointerEnter={onPointerEnter}
         onClick={onClick}
         onContextMenu={onContextMenu}
         onDoubleClick={() => {
           if (canEdit) onStartEdit()
         }}
-        className={`relative inline select-none rounded border px-1.5 py-0.5 transition-colors ${
+        className={`relative inline max-w-full select-none rounded border px-1.5 py-0.5 text-left break-words [overflow-wrap:anywhere] transition-colors ${
           isActive
             ? 'border-black bg-black text-white dark:border-white dark:bg-white dark:text-black'
             : isSelected
@@ -354,39 +377,59 @@ const WordChip = ({
   )
 }
 
+interface TranscriptSnapshot {
+  words: MemoWord[]
+  segments: MemoSegment[]
+}
+
 interface WordActionBarProps {
-  canMerge: boolean
+  canMergeWords: boolean
+  canMergeSegments: boolean
   canSplit: boolean
   mergePreview: string | null
+  segmentMergePreview: string | null
   splitPreview: string | null
-  onMerge: () => void
+  onMergeWords: () => void
+  onMergeSegments: () => void
   onSplit: () => void
   onClearSelection: () => void
 }
 
 const WordActionBar = ({
-  canMerge,
+  canMergeWords,
+  canMergeSegments,
   canSplit,
   mergePreview,
+  segmentMergePreview,
   splitPreview,
-  onMerge,
+  onMergeWords,
+  onMergeSegments,
   onSplit,
   onClearSelection,
 }: WordActionBarProps) => (
   <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-black/15 bg-black/[0.02] px-3 py-2 dark:border-white/15 dark:bg-white/[0.03]">
-    <span className="text-xs text-black/50 dark:text-white/50">
-      {canMerge || canSplit ? '선택됨' : ''}
-    </span>
-    {canMerge && (
+    <span className="text-xs text-black/50 dark:text-white/50">선택됨</span>
+    {canMergeWords && (
       <button
         type="button"
-        onClick={onMerge}
+        onClick={onMergeWords}
         className="inline-flex items-center gap-1.5 rounded-md border border-black/20 px-2.5 py-1 text-xs font-medium text-black transition-colors hover:bg-black hover:text-white dark:border-white/20 dark:text-white dark:hover:bg-white dark:hover:text-black"
-        title={mergePreview ?? '합치기'}
+        title={mergePreview ?? '단어 합치기'}
       >
         <Merge size={13} />
-        합치기
+        단어 합치기
         <span className="text-black/40 dark:text-white/40">Ctrl+M</span>
+      </button>
+    )}
+    {canMergeSegments && (
+      <button
+        type="button"
+        onClick={onMergeSegments}
+        className="inline-flex items-center gap-1.5 rounded-md border border-black/20 px-2.5 py-1 text-xs font-medium text-black transition-colors hover:bg-black hover:text-white dark:border-white/20 dark:text-white dark:hover:bg-white dark:hover:text-black"
+        title={segmentMergePreview ?? '문장 합치기'}
+      >
+        <Merge size={13} />
+        문장 합치기
       </button>
     )}
     {canSplit && (
@@ -420,7 +463,7 @@ interface MemoTranscriptEditorProps {
   currentTime: number
   canSeek: boolean
   onSeek: (time?: number) => void
-  onSaveWords?: (words: MemoWord[]) => Promise<void>
+  onSaveContent?: (content: TranscriptSnapshot) => Promise<void>
 }
 
 const MemoTranscriptEditor = ({
@@ -431,13 +474,13 @@ const MemoTranscriptEditor = ({
   currentTime,
   canSeek,
   onSeek,
-  onSaveWords,
+  onSaveContent,
 }: MemoTranscriptEditorProps) => {
-  // Optimistic UI state: null means use props.words
   const [optimisticWords, setOptimisticWords] = useState<MemoWord[] | null>(null)
+  const [optimisticSegments, setOptimisticSegments] = useState<MemoSegment[] | null>(null)
   
   const [selectedIndices, setSelectedIndices] = useState<number[]>([])
-  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null)
+  const [selectedSegmentIndices, setSelectedSegmentIndices] = useState<number[]>([])
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -445,18 +488,38 @@ const MemoTranscriptEditor = ({
 
   const activeSegmentRef = useRef<HTMLDivElement | null>(null)
   const dragAnchorRef = useRef(-1)
+  const dragSelectEnabledRef = useRef(false)
   const didDragRef = useRef(false)
-  const undoStackRef = useRef<MemoWord[][]>([])
+  const segmentDragAnchorRef = useRef(-1)
+  const segmentDragSelectEnabledRef = useRef(false)
+  const segmentDidDragRef = useRef(false)
+  const undoStackRef = useRef<TranscriptSnapshot[]>([])
   const displayWordsRef = useRef(words)
-  const skipWordsResetRef = useRef(false)
+  const displaySegmentsRef = useRef(segments)
+  const skipContentResetRef = useRef(false)
   const prevMemoIdRef = useRef(memoId)
   const setWordSelection = useWordSelectionStore((state) => state.setSelection)
   const clearWordSelection = useWordSelectionStore((state) => state.clearSelection)
 
+  const isCoarsePointer = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(pointer: coarse)').matches
+  }, [])
+
   const displayWords = optimisticWords ?? words
+  const displaySegments = optimisticSegments ?? segments
   displayWordsRef.current = displayWords
+  displaySegmentsRef.current = displaySegments
 
   const cloneWords = (source: MemoWord[]) => source.map((word) => ({ ...word }))
+  const cloneSegments = (source: MemoSegment[]) => source.map((segment) => ({ ...segment }))
+  const getSnapshot = useCallback(
+    (): TranscriptSnapshot => ({
+      words: cloneWords(displayWordsRef.current),
+      segments: cloneSegments(displaySegmentsRef.current),
+    }),
+    [],
+  )
 
   useEffect(() => {
     if (prevMemoIdRef.current === memoId) return
@@ -465,73 +528,85 @@ const MemoTranscriptEditor = ({
     undoStackRef.current = []
     clearWordSelection()
     setOptimisticWords(null)
+    setOptimisticSegments(null)
     setSelectedIndices([])
-    setLastSelectedIndex(null)
+    setSelectedSegmentIndices([])
     setContextMenu(null)
     setEditingIndex(null)
     dragAnchorRef.current = -1
-    didDragRef.current = false
+    dragSelectEnabledRef.current = false
+    segmentDragAnchorRef.current = -1
+    segmentDragSelectEnabledRef.current = false
+    segmentDidDragRef.current = false
   }, [memoId, clearWordSelection])
 
   useEffect(() => {
-    if (!memoId || !onSaveWords) {
+    if (!memoId || !onSaveContent) {
       clearWordSelection()
       return
     }
 
     setWordSelection(memoId, selectedIndices)
-  }, [memoId, onSaveWords, selectedIndices, setWordSelection, clearWordSelection])
+  }, [memoId, onSaveContent, selectedIndices, setWordSelection, clearWordSelection])
 
   useEffect(() => {
-    if (skipWordsResetRef.current) {
-      skipWordsResetRef.current = false
+    if (skipContentResetRef.current) {
+      skipContentResetRef.current = false
       setOptimisticWords(null)
+      setOptimisticSegments(null)
       return
     }
 
     setOptimisticWords(null)
+    setOptimisticSegments(null)
     setSelectedIndices([])
-    setLastSelectedIndex(null)
+    setSelectedSegmentIndices([])
     setContextMenu(null)
     setEditingIndex(null)
     undoStackRef.current = []
     dragAnchorRef.current = -1
+    dragSelectEnabledRef.current = false
     didDragRef.current = false
-  }, [words])
+    segmentDragAnchorRef.current = -1
+    segmentDragSelectEnabledRef.current = false
+    segmentDidDragRef.current = false
+  }, [words, segments])
 
-  const saveWords = useCallback(
-    async (nextWords: MemoWord[]) => {
-      if (!onSaveWords) return
+  const saveContent = useCallback(
+    async (next: TranscriptSnapshot) => {
+      if (!onSaveContent) return
 
-      setOptimisticWords(nextWords)
+      setOptimisticWords(next.words)
+      setOptimisticSegments(next.segments)
       setIsSaving(true)
 
       try {
-        skipWordsResetRef.current = true
-        await onSaveWords(nextWords)
+        skipContentResetRef.current = true
+        await onSaveContent(next)
       } catch {
         setOptimisticWords(null)
+        setOptimisticSegments(null)
         throw new Error('save failed')
       } finally {
         setIsSaving(false)
       }
     },
-    [onSaveWords],
+    [onSaveContent],
   )
 
   const pushUndoSnapshot = useCallback(() => {
-    undoStackRef.current.push(cloneWords(displayWordsRef.current))
+    undoStackRef.current.push(getSnapshot())
     if (undoStackRef.current.length > 50) {
       undoStackRef.current.shift()
     }
-  }, [])
+  }, [getSnapshot])
 
   const applyChange = useCallback(
-    async (nextWords: MemoWord[]) => {
+    async (next: TranscriptSnapshot) => {
       pushUndoSnapshot()
-      await saveWords(nextWords)
+      await saveContent(next)
     },
-    [pushUndoSnapshot, saveWords],
+    [pushUndoSnapshot, saveContent],
   )
 
   const speakerColorMap = useMemo(() => {
@@ -543,8 +618,8 @@ const MemoTranscriptEditor = ({
   }, [speakers])
 
   const segmentGroups = useMemo(
-    () => groupWordsBySegments(segments, displayWords),
-    [segments, displayWords],
+    () => groupWordsBySegments(displaySegments, displayWords),
+    [displaySegments, displayWords],
   )
 
   const activeWordIndex = useMemo(
@@ -553,12 +628,12 @@ const MemoTranscriptEditor = ({
   )
 
   const activeSegmentIndex = useMemo(() => {
-    if (!segments.length) return -1
-    const byTime = findActiveSegmentIndex(segments, currentTime)
+    if (!displaySegments.length) return -1
+    const byTime = findActiveSegmentIndex(displaySegments, currentTime)
     if (byTime >= 0) return byTime
     if (activeWordIndex < 0) return -1
     return segmentGroups.findIndex((group) => group.wordIndices.includes(activeWordIndex))
-  }, [segments, currentTime, activeWordIndex, segmentGroups])
+  }, [displaySegments, currentTime, activeWordIndex, segmentGroups])
 
   useEffect(() => {
     if (editingIndex != null) return
@@ -571,8 +646,30 @@ const MemoTranscriptEditor = ({
     setSelectedIndices(Array.from({ length: right - left + 1 }, (_, index) => left + index))
   }
 
+  const setSegmentRangeSelection = (anchor: number, target: number) => {
+    const left = Math.min(anchor, target)
+    const right = Math.max(anchor, target)
+    setSelectedSegmentIndices(
+      Array.from({ length: right - left + 1 }, (_, index) => left + index),
+    )
+  }
+
+  const clearWordSelectionState = () => {
+    setSelectedIndices([])
+    setContextMenu(null)
+  }
+
+  const clearSegmentSelectionState = () => {
+    setSelectedSegmentIndices([])
+  }
+
+  const clearSelection = () => {
+    clearWordSelectionState()
+    clearSegmentSelectionState()
+  }
+
   const handleWordClick = (index: number, event: MouseEvent<HTMLButtonElement>) => {
-    if (!onSaveWords) {
+    if (!onSaveContent) {
       if (canSeek) onSeek(displayWords[index].start)
       return
     }
@@ -584,58 +681,117 @@ const MemoTranscriptEditor = ({
 
     if (event.detail > 1) return
 
-    if (event.shiftKey && lastSelectedIndex != null) {
-      setRangeSelection(lastSelectedIndex, index)
+    if (shouldSelectOnClick(event, isCoarsePointer)) {
+      clearSegmentSelectionState()
+      setSelectedIndices((prev) => {
+        if (prev.includes(index)) return prev.filter((value) => value !== index)
+        return [...prev, index].sort((a, b) => a - b)
+      })
       return
     }
 
-    setSelectedIndices((prev) => {
-      if (prev.includes(index)) return prev.filter((value) => value !== index)
-      return [...prev, index].sort((a, b) => a - b)
-    })
-    setLastSelectedIndex(index)
+    if (canSeek) {
+      onSeek(displayWords[index].start)
+    }
   }
 
-  const handlePointerDown = (index: number) => {
-    if (!onSaveWords) return
+  const handlePointerDown = (index: number, event: PointerEvent<HTMLButtonElement>) => {
+    if (!onSaveContent) return
     didDragRef.current = false
     dragAnchorRef.current = index
+    dragSelectEnabledRef.current = shouldSelectOnPointerDown(event, isCoarsePointer)
   }
 
   const handlePointerEnter = (index: number) => {
-    if (!onSaveWords || dragAnchorRef.current < 0) return
+    if (!onSaveContent || dragAnchorRef.current < 0 || !dragSelectEnabledRef.current) return
     if (index !== dragAnchorRef.current) {
       didDragRef.current = true
+      clearSegmentSelectionState()
       setRangeSelection(dragAnchorRef.current, index)
     }
   }
 
   const handlePointerUp = () => {
     dragAnchorRef.current = -1
+    dragSelectEnabledRef.current = false
+  }
+
+  const handleSegmentHeaderClick = (
+    segmentIndex: number,
+    event: MouseEvent<HTMLDivElement>,
+  ) => {
+    if (!onSaveContent) {
+      if (canSeek) onSeek(displaySegments[segmentIndex]?.start)
+      return
+    }
+
+    if (segmentDidDragRef.current) {
+      segmentDidDragRef.current = false
+      return
+    }
+
+    if (shouldSelectOnClick(event, isCoarsePointer)) {
+      clearWordSelectionState()
+      setSelectedSegmentIndices((prev) => {
+        if (prev.includes(segmentIndex)) return prev.filter((value) => value !== segmentIndex)
+        return [...prev, segmentIndex].sort((a, b) => a - b)
+      })
+      return
+    }
+
+    if (canSeek) {
+      onSeek(displaySegments[segmentIndex]?.start)
+    }
+  }
+
+  const handleSegmentPointerDown = (
+    segmentIndex: number,
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!onSaveContent) return
+    segmentDidDragRef.current = false
+    segmentDragAnchorRef.current = segmentIndex
+    segmentDragSelectEnabledRef.current = shouldSelectOnPointerDown(event, isCoarsePointer)
+  }
+
+  const handleSegmentPointerEnter = (segmentIndex: number) => {
+    if (
+      !onSaveContent ||
+      segmentDragAnchorRef.current < 0 ||
+      !segmentDragSelectEnabledRef.current
+    ) {
+      return
+    }
+
+    if (segmentIndex !== segmentDragAnchorRef.current) {
+      segmentDidDragRef.current = true
+      clearWordSelectionState()
+      setSegmentRangeSelection(segmentDragAnchorRef.current, segmentIndex)
+    }
+  }
+
+  const handleSegmentPointerUp = () => {
+    segmentDragAnchorRef.current = -1
+    segmentDragSelectEnabledRef.current = false
   }
 
   const handleContextMenu = (index: number, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault()
-    
+
     if (!selectedIndices.includes(index)) {
+      clearSegmentSelectionState()
       setSelectedIndices([index])
-      setLastSelectedIndex(index)
     }
 
     setContextMenu({ x: event.clientX, y: event.clientY, wordIndex: index })
   }
 
-  const canMerge = canMergeSelectedIndices(selectedIndices)
+  const canMergeWords = canMergeSelectedIndices(selectedIndices)
+  const canMergeSegments = canMergeSelectedSegmentIndices(selectedSegmentIndices)
   const canSplit = canSplitSelectedIndices(displayWords, selectedIndices)
 
-  const clearSelection = () => {
-    setSelectedIndices([])
-    setLastSelectedIndex(null)
-    setContextMenu(null)
-  }
-
   const handleUndo = useCallback(async () => {
-    if (!onSaveWords) return
+    if (!onSaveContent) return
 
     const previous = undoStackRef.current.pop()
     if (!previous) return
@@ -644,32 +800,72 @@ const MemoTranscriptEditor = ({
     setEditingIndex(null)
 
     try {
-      await saveWords(previous)
+      await saveContent(previous)
     } catch {
       undoStackRef.current.push(previous)
     }
-  }, [onSaveWords, saveWords])
+  }, [onSaveContent, saveContent])
 
-  const handleMerge = useCallback(async () => {
-    if (!canMerge || !onSaveWords) return
+  const handleMergeWords = useCallback(async () => {
+    if (!canMergeWords || !onSaveContent) return
 
     const mergedText = selectedIndices
       .map((index) => displayWords[index]?.word ?? '')
       .filter(Boolean)
       .join(' ')
-    const nextWords = mergeWordRange(displayWords, selectedIndices)
+    const { words: nextWords, segments: nextSegments } = applyWordMergeWithSegments(
+      displaySegments,
+      displayWords,
+      selectedIndices,
+    )
     clearSelection()
 
     try {
-      await applyChange(nextWords)
+      await applyChange({ words: nextWords, segments: nextSegments })
       toast.success('단어를 합쳤습니다.', { description: mergedText })
     } catch {
-      // reverted in saveWords
+      // reverted in saveContent
     }
-  }, [applyChange, canMerge, displayWords, onSaveWords, selectedIndices])
+  }, [
+    applyChange,
+    canMergeWords,
+    displaySegments,
+    displayWords,
+    onSaveContent,
+    selectedIndices,
+  ])
+
+  const handleMergeSegments = useCallback(async () => {
+    if (!canMergeSegments || !onSaveContent) return
+
+    const mergedText = selectedSegmentIndices
+      .map((index) => displaySegments[index]?.text?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ')
+    const { words: nextWords, segments: nextSegments } = mergeSelectedSegments(
+      displaySegments,
+      displayWords,
+      selectedSegmentIndices,
+    )
+    clearSelection()
+
+    try {
+      await applyChange({ words: nextWords, segments: nextSegments })
+      toast.success('문장을 합쳤습니다.', { description: mergedText })
+    } catch {
+      // reverted in saveContent
+    }
+  }, [
+    applyChange,
+    canMergeSegments,
+    displaySegments,
+    displayWords,
+    onSaveContent,
+    selectedSegmentIndices,
+  ])
 
   const handleSplit = useCallback(async () => {
-    if (!canSplit || !onSaveWords) return
+    if (!canSplit || !onSaveContent) return
 
     const splitDescription = selectedIndices
       .flatMap((index) => displayWords[index]?.word.trim().split(/\s+/).filter(Boolean) ?? [])
@@ -678,19 +874,20 @@ const MemoTranscriptEditor = ({
       selectedIndices.length === 1
         ? splitWordAtIndex(displayWords, selectedIndices[0])
         : splitWordsAtIndices(displayWords, selectedIndices)
+    const nextSegments = applyWordSplitWithSegments(displaySegments, displayWords, nextWords)
 
     clearSelection()
 
     try {
-      await applyChange(nextWords)
+      await applyChange({ words: nextWords, segments: nextSegments })
       toast.success('단어를 나눴습니다.', { description: splitDescription })
     } catch {
-      // reverted in saveWords
+      // reverted in saveContent
     }
-  }, [applyChange, canSplit, displayWords, onSaveWords, selectedIndices])
+  }, [applyChange, canSplit, displaySegments, displayWords, onSaveContent, selectedIndices])
 
   useEffect(() => {
-    if (!onSaveWords) return
+    if (!onSaveContent) return
 
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
@@ -710,9 +907,9 @@ const MemoTranscriptEditor = ({
       }
 
       if (event.code === 'KeyM' && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
-        if (!canMerge) return
+        if (!canMergeWords) return
         event.preventDefault()
-        void handleMerge()
+        void handleMergeWords()
         return
       }
 
@@ -724,18 +921,17 @@ const MemoTranscriptEditor = ({
 
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [canMerge, canSplit, handleMerge, handleSplit, handleUndo, onSaveWords])
+  }, [canMergeWords, canSplit, handleMergeWords, handleSplit, handleUndo, onSaveContent])
 
   const startEdit = (index: number) => {
-    if (!onSaveWords) return
-    setSelectedIndices([])
-    setContextMenu(null)
+    if (!onSaveContent) return
+    clearSelection()
     setEditingIndex(index)
     setDraft(displayWords[index]?.word ?? '')
   }
 
   const commitEdit = async () => {
-    if (editingIndex == null || !onSaveWords) return
+    if (editingIndex == null || !onSaveContent) return
 
     const trimmed = draft.trim()
     if (!trimmed) {
@@ -751,18 +947,26 @@ const MemoTranscriptEditor = ({
       nextWords = splitWordAtIndex(nextWords, editingIndex)
     }
 
+    const nextSegments = syncSegmentTextsFromWords(displaySegments, nextWords)
     setEditingIndex(null)
 
     try {
-      await applyChange(nextWords)
+      await applyChange({ words: nextWords, segments: nextSegments })
     } catch {
-      // reverted in saveWords
+      // reverted in saveContent
     }
   }
 
-  const mergePreview = canMerge
+  const mergePreview = canMergeWords
     ? selectedIndices
         .map((index) => displayWords[index]?.word ?? '')
+        .filter(Boolean)
+        .join(' ')
+    : null
+
+  const segmentMergePreview = canMergeSegments
+    ? selectedSegmentIndices
+        .map((index) => displaySegments[index]?.text?.trim() ?? '')
         .filter(Boolean)
         .join(' ')
     : null
@@ -773,20 +977,25 @@ const MemoTranscriptEditor = ({
         .join(' | ')
     : null
 
-  const editorHint = onSaveWords
-    ? '클릭·드래그·Shift+클릭으로 선택 → 합치기(Ctrl+M) / 나누기(Ctrl+Shift+M) / 실행 취소(Ctrl+Z). 더블클릭 수정 시 공백 넣으면 자동 나뉩니다.'
+  const editorHint = onSaveContent
+    ? 'Ctrl+클릭·Ctrl+드래그로 단어/문장 선택(모바일은 탭·드래그) → 단어 합치기(Ctrl+M) / 문장 합치기 / 나누기(Ctrl+Shift+M). 클릭 시 재생 이동.'
     : '단어를 클릭하면 해당 시점으로 이동합니다. 마우스를 올리면 상세 정보가 표시됩니다.'
 
   const renderActionBar = () => {
-    if (!onSaveWords || selectedIndices.length === 0) return null
+    if (!onSaveContent || (selectedIndices.length === 0 && selectedSegmentIndices.length === 0)) {
+      return null
+    }
 
     return (
       <WordActionBar
-        canMerge={canMerge}
+        canMergeWords={canMergeWords}
+        canMergeSegments={canMergeSegments}
         canSplit={canSplit}
         mergePreview={mergePreview}
+        segmentMergePreview={segmentMergePreview}
         splitPreview={splitPreview}
-        onMerge={() => void handleMerge()}
+        onMergeWords={() => void handleMergeWords()}
+        onMergeSegments={() => void handleMergeSegments()}
         onSplit={() => void handleSplit()}
         onClearSelection={clearSelection}
       />
@@ -794,20 +1003,20 @@ const MemoTranscriptEditor = ({
   }
 
   const renderContextMenu = () => {
-    if (!contextMenu || !onSaveWords) return null
+    if (!contextMenu || !onSaveContent) return null
 
     const word = displayWords[contextMenu.wordIndex]
 
     return (
       <WordContextMenu
         menu={contextMenu}
-        canMerge={canMerge}
+        canMerge={canMergeWords}
         canSplit={canSplit}
         canSeek={canSeek}
         hasSelection={selectedIndices.length > 0}
         mergePreview={mergePreview}
         splitPreview={splitPreview}
-        onMerge={() => void handleMerge()}
+        onMerge={() => void handleMergeWords()}
         onSplit={() => void handleSplit()}
         onSeek={() => onSeek(word?.start)}
         onClearSelection={clearSelection}
@@ -831,14 +1040,14 @@ const MemoTranscriptEditor = ({
         isEditing={editingIndex === wordIndex}
         draft={draft}
         canSeek={canSeek}
-        canEdit={!!onSaveWords}
+        canEdit={!!onSaveContent}
         onDraftChange={setDraft}
         onCommit={() => void commitEdit()}
         onCancel={() => setEditingIndex(null)}
         onStartEdit={() => startEdit(wordIndex)}
         onClick={(event) => handleWordClick(wordIndex, event)}
         onContextMenu={(event) => handleContextMenu(wordIndex, event)}
-        onPointerDown={() => handlePointerDown(wordIndex)}
+        onPointerDown={(event) => handlePointerDown(wordIndex, event)}
         onPointerEnter={() => handlePointerEnter(wordIndex)}
         onPointerUp={handlePointerUp}
       />
@@ -861,6 +1070,7 @@ const MemoTranscriptEditor = ({
             const speakerLabel = formatSpeakerLabel(segment.speaker, speakerIndex)
             const speakerColor = getSpeakerColor(segment.speaker, speakerColorMap, speakerIndex)
             const isActive = segmentIndex === activeSegmentIndex
+            const isSegmentSelected = selectedSegmentIndices.includes(segmentIndex)
             const hasWords = wordIndices.length > 0
 
             return (
@@ -868,20 +1078,27 @@ const MemoTranscriptEditor = ({
                 key={`${segment.start ?? segmentIndex}-${segmentIndex}`}
                 ref={isActive ? activeSegmentRef : undefined}
                 className={`overflow-visible rounded-md border px-4 py-3 transition-colors ${
-                  isActive
-                    ? 'border-black/30 bg-black/3 dark:border-white/30 dark:bg-white/4'
-                    : 'border-black/10 dark:border-white/10'
+                  isSegmentSelected
+                    ? 'border-black/50 ring-2 ring-black/15 dark:border-white/50 dark:ring-white/15'
+                    : isActive
+                      ? 'border-black/30 bg-black/3 dark:border-white/30 dark:bg-white/4'
+                      : 'border-black/10 dark:border-white/10'
                 }`}
               >
-                <div className="mb-2 flex items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => { if (canSeek) onSeek(segment.start) }}
-                    disabled={!canSeek}
+                <div
+                  className={`mb-2 flex items-center gap-2 text-xs ${
+                    onSaveContent ? 'cursor-pointer select-none' : ''
+                  }`}
+                  onClick={(event) => handleSegmentHeaderClick(segmentIndex, event)}
+                  onPointerDown={(event) => handleSegmentPointerDown(segmentIndex, event)}
+                  onPointerEnter={() => handleSegmentPointerEnter(segmentIndex)}
+                  onPointerUp={handleSegmentPointerUp}
+                >
+                  <span
                     className={`font-mono transition-colors ${
                       canSeek
                         ? 'text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white'
-                        : 'cursor-default text-black/40 dark:text-white/40'
+                        : 'text-black/40 dark:text-white/40'
                     }`}
                   >
                     {formatTimestamp(segment.start)}
@@ -891,14 +1108,19 @@ const MemoTranscriptEditor = ({
                         – {formatTimestamp(segment.end)}
                       </span>
                     )}
-                  </button>
+                  </span>
                   <span className={`font-medium ${speakerColor}`}>{speakerLabel}</span>
+                  {isSegmentSelected && (
+                    <span className="rounded bg-black/10 px-1.5 py-0.5 text-[10px] font-medium text-black/60 dark:bg-white/10 dark:text-white/60">
+                      문장 선택
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 text-sm leading-relaxed text-black dark:text-white">
                   {hasWords
                     ? wordIndices.map((wordIndex) => (
-                        <span key={`segment-word-${wordIndex}`} className="inline-flex">
+                        <span key={`segment-word-${wordIndex}`} className="inline-flex max-w-full">
                           {renderWord(wordIndex)}
                         </span>
                       ))
@@ -923,7 +1145,7 @@ const MemoTranscriptEditor = ({
         </p>
         <div className="flex flex-wrap gap-1.5 text-sm leading-relaxed text-black dark:text-white">
           {displayWords.map((word, index) => (
-            <span key={`${word.id}-${index}`} className="inline-flex">
+            <span key={`${word.id}-${index}`} className="inline-flex max-w-full">
               {renderWord(index)}
             </span>
           ))}

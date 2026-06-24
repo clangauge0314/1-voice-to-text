@@ -2,13 +2,24 @@ import { useEffect, useState } from 'react'
 
 import { fetchMemo, fetchTranscript, fetchUpload, getUploadAudioUrl } from '../lib/api'
 
-import type { Memo, MemoWord } from '../stores/memoStore'
+import type { Memo, MemoSegment, MemoWord } from '../stores/memoStore'
 
 import { useMemoStore } from '../stores/memoStore'
 
 import { buildMemoFromTranscript } from '../utils/transcriptToMemo'
 
 
+
+function mapSavedSegments(segments: unknown): MemoSegment[] | undefined {
+  if (!Array.isArray(segments) || segments.length === 0) return undefined
+
+  return segments.map((segment) => ({
+    start: typeof segment.start === 'number' ? segment.start : undefined,
+    end: typeof segment.end === 'number' ? segment.end : undefined,
+    text: typeof segment.text === 'string' ? segment.text.trim() || undefined : undefined,
+    speaker: segment.speaker ?? undefined,
+  }))
+}
 
 function mapSavedWords(words: unknown): MemoWord[] | undefined {
 
@@ -46,14 +57,11 @@ export function useMemoTranscript(memo: Memo | undefined) {
 
 
     const needsDbWords = !memo.words?.length
-
     const needsSegments = !memo.segments?.length
-
     const needsAudio = !memo.audioUrl && !!memo.uploadId
+    const needsMemoDetail = needsDbWords || needsSegments
 
-
-
-    if (!needsDbWords && !needsSegments && !needsAudio) return
+    if (!needsMemoDetail && !needsAudio) return
 
 
 
@@ -72,13 +80,9 @@ export function useMemoTranscript(memo: Memo | undefined) {
       try {
 
         const [memoDetail, transcript, upload] = await Promise.all([
-
-          needsDbWords ? fetchMemo(memo.id) : null,
-
+          needsMemoDetail ? fetchMemo(memo.id) : null,
           needsSegments ? fetchTranscript(memo.transcriptId) : null,
-
           needsAudio ? fetchUpload(memo.uploadId) : null,
-
         ])
 
 
@@ -100,18 +104,18 @@ export function useMemoTranscript(memo: Memo | undefined) {
 
 
         const savedWords = mapSavedWords(memoDetail?.words)
+        const savedSegments = mapSavedSegments(memoDetail?.segments)
 
         if (savedWords?.length) {
-
           patch.words = savedWords
-
           patch.content = savedWords.map((word) => word.word).join(' ')
-
           patch.preview = memoDetail?.preview ?? memo.preview
-
         }
 
-
+        if (savedSegments?.length) {
+          patch.segments = savedSegments
+          patch.segmentCount = savedSegments.length
+        }
 
         if (transcript?.status === 'completed' && transcript.content) {
 
@@ -131,24 +135,21 @@ export function useMemoTranscript(memo: Memo | undefined) {
 
 
 
-          if (needsSegments) {
-
+          if (needsSegments && !savedSegments?.length) {
             patch.speakers = built.speakers
-
             patch.segments = built.segments
-
             patch.segmentCount = built.segmentCount
-
             patch.wordCount = built.wordCount
-
             patch.duration = built.duration ?? memo.duration
-
             patch.language = built.language ?? memo.language
-
             if (built.audioUrl) patch.audioUrl = built.audioUrl
-
+          } else if (needsSegments) {
+            patch.speakers = built.speakers
+            patch.wordCount = built.wordCount
+            patch.duration = built.duration ?? memo.duration
+            patch.language = built.language ?? memo.language
+            if (built.audioUrl) patch.audioUrl = built.audioUrl
           }
-
         }
 
 

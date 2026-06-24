@@ -15,10 +15,12 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6, select: false },
     plan: {
       type: String,
-      enum: ['free', 'pro', 'team'],
+      enum: ['free', 'basic', 'pro', 'team'],
       default: 'free',
     },
     usedMinutes: { type: Number, default: 0, min: 0 },
+    usedSeconds: { type: Number, default: 0, min: 0 },
+    usedAiNotes: { type: Number, default: 0, min: 0 },
     usagePeriodStart: { type: Date, default: () => getStartOfMonth() },
   },
   { timestamps: true },

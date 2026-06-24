@@ -61,5 +61,10 @@ export function toMemoResponse(memo, upload, transcript, options = {}) {
     response.words = memo.words
   }
 
+  if (includeWords && Array.isArray(memo.segments) && memo.segments.length > 0) {
+    response.segments = memo.segments
+    response.segmentCount = memo.segments.length
+  }
+
   return response
 }

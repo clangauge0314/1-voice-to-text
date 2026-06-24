@@ -96,6 +96,7 @@ export interface TranscriptResponse {
   error: string | null
   createdAt: string
   updatedAt: string
+  usage?: UsageData
 }
 
 export interface MemoWordResponse {
@@ -105,6 +106,13 @@ export interface MemoWordResponse {
   end?: number
   speaker?: string | null
   note?: string
+}
+
+export interface MemoSegmentResponse {
+  start?: number
+  end?: number
+  text?: string
+  speaker?: string | null
 }
 
 export interface MemoResponse {
@@ -120,6 +128,7 @@ export interface MemoResponse {
   segmentCount: number | null
   wordCount: number | null
   words?: MemoWordResponse[]
+  segments?: MemoSegmentResponse[]
   createdAt: string
   updatedAt: string
 }
@@ -224,8 +233,40 @@ export function saveMemoWords(
   })
 }
 
+export function saveMemoContent(
+  id: string,
+  content: {
+    words: Array<{
+      id: number
+      word: string
+      start?: number
+      end?: number
+      speaker?: string
+      note?: string
+    }>
+    segments: Array<{
+      start?: number
+      end?: number
+      text?: string
+      speaker?: string
+    }>
+  },
+) {
+  return apiFetch<MemoResponse>(`/memos/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(content),
+  })
+}
+
 export function deleteMemo(id: string) {
   return apiFetch<{ success: boolean }>(`/memos/${id}`, {
     method: 'DELETE',
   })
+}
+
+export function generateWordAiNote(memoId: string, wordIndex: number) {
+  return apiFetch<{ note: string; memo: MemoResponse; usage: UsageData }>(
+    `/memos/${memoId}/words/${wordIndex}/ai-note`,
+    { method: 'POST' },
+  )
 }

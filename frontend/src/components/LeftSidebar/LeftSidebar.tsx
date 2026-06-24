@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import {
   Check,
+  ChevronDown,
   Crown,
   FileText,
   Home,
@@ -13,19 +14,19 @@ import {
   User,
   X,
 } from 'lucide-react'
-import { useState, type MouseEvent } from 'react'
-import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAuthModalStore } from '../../stores/authModalStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useMemoStore, type Memo } from '../../stores/memoStore'
 import { SIDEBAR_WIDTH, useSidebarStore } from '../../stores/sidebarStore'
-import { formatMinutes, type PlanType, useUsageStore } from '../../stores/usageStore'
+import { formatAiNotes, formatMinutes, type PlanType, useUsageStore } from '../../stores/usageStore'
 
 const planBadgeStyles: Record<PlanType, string> = {
   free: 'bg-zinc-200 text-zinc-800 dark:bg-zinc-600 dark:text-white',
+  basic: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
   pro: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  team: 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-100',
 }
 
 const navItems = [
@@ -41,6 +42,8 @@ const SidebarFooter = () => {
   const planLabel = useUsageStore((state) => state.planLabel)
   const usedMinutes = useUsageStore((state) => state.usedMinutes)
   const remainingMinutes = useUsageStore((state) => state.remainingMinutes)
+  const usedAiNotes = useUsageStore((state) => state.usedAiNotes)
+  const remainingAiNotes = useUsageStore((state) => state.remainingAiNotes)
 
   if (user) {
     const handleLogout = () => {
@@ -62,7 +65,10 @@ const SidebarFooter = () => {
               {user.email}
             </p>
             <p className="mt-1 text-[10px] font-medium leading-tight text-black/70 dark:text-white/75">
-              {formatMinutes(usedMinutes)} 사용 · {formatMinutes(remainingMinutes)} 남음
+              음성 {formatMinutes(usedMinutes)} 사용 · {formatMinutes(remainingMinutes)} 남음
+            </p>
+            <p className="mt-0.5 text-[10px] leading-tight text-black/55 dark:text-white/60">
+              AI {formatAiNotes(usedAiNotes)} 사용 · {formatAiNotes(remainingAiNotes)} 남음
             </p>
           </div>
           <span
@@ -266,16 +272,72 @@ const MemoSidebarItem = ({
   )
 }
 
+const MEMO_ITEM_FALLBACK_HEIGHT = 64
+const MEMO_ITEM_GAP = 4
+
+function pickRecentMemos(memos: Memo[], limit: number, activeMemoId?: string) {
+  if (memos.length <= limit) return memos
+
+  const recent = memos.slice(0, limit)
+  if (!activeMemoId || recent.some((memo) => memo.id === activeMemoId)) {
+    return recent
+  }
+
+  const active = memos.find((memo) => memo.id === activeMemoId)
+  if (!active) return recent
+
+  return [...recent.slice(0, limit - 1), active]
+}
+
 const MemoList = ({
   memos,
   activeMemoId,
   onSelect,
+  isExpanded,
+  onExpandedChange,
 }: {
   memos: Memo[]
   activeMemoId: string | undefined
   onSelect: (memoId: string) => void
+  isExpanded: boolean
+  onExpandedChange: (expanded: boolean) => void
 }) => {
   const navigate = useNavigate()
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [maxVisible, setMaxVisible] = useState(5)
+
+  const needsCollapse = memos.length > maxVisible
+  const displayMemos =
+    needsCollapse && !isExpanded ? pickRecentMemos(memos, maxVisible, activeMemoId) : memos
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+
+    const measure = () => {
+      const height = viewport.clientHeight
+      if (height <= 0) return
+
+      const firstItem = viewport.querySelector('li')
+      const itemHeight = firstItem
+        ? firstItem.getBoundingClientRect().height + MEMO_ITEM_GAP
+        : MEMO_ITEM_FALLBACK_HEIGHT
+
+      setMaxVisible(Math.max(1, Math.floor(height / itemHeight)))
+    }
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(viewport)
+    measure()
+
+    return () => observer.disconnect()
+  }, [memos.length, isExpanded])
+
+  useEffect(() => {
+    if (!needsCollapse) {
+      onExpandedChange(false)
+    }
+  }, [needsCollapse, onExpandedChange])
 
   const handleDeleted = (memoId: string) => {
     if (activeMemoId === memoId) {
@@ -284,23 +346,41 @@ const MemoList = ({
   }
 
   return (
-    <ul className="space-y-1">
-      {memos.length === 0 ? (
-        <li className="px-2.5 py-3 text-xs text-black/50 dark:text-white/50">
-          아직 메모가 없습니다.
-        </li>
-      ) : (
-        memos.map((memo) => (
-          <MemoSidebarItem
-            key={memo.id}
-            memo={memo}
-            isActive={activeMemoId === memo.id}
-            onSelect={() => onSelect(memo.id)}
-            onDeleted={() => handleDeleted(memo.id)}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={viewportRef} className="min-h-0 flex-1 overflow-hidden">
+        <ul className={`space-y-1 ${isExpanded ? 'h-full overflow-y-auto pr-0.5' : ''}`}>
+          {memos.length === 0 ? (
+            <li className="px-2.5 py-3 text-xs text-black/50 dark:text-white/50">
+              아직 메모가 없습니다.
+            </li>
+          ) : (
+            displayMemos.map((memo) => (
+              <MemoSidebarItem
+                key={memo.id}
+                memo={memo}
+                isActive={activeMemoId === memo.id}
+                onSelect={() => onSelect(memo.id)}
+                onDeleted={() => handleDeleted(memo.id)}
+              />
+            ))
+          )}
+        </ul>
+      </div>
+
+      {needsCollapse && (
+        <button
+          type="button"
+          onClick={() => onExpandedChange(!isExpanded)}
+          className="mt-2 flex w-full shrink-0 items-center justify-center gap-1 rounded-lg border border-black/10 px-2 py-1.5 text-[11px] font-medium text-black/60 transition-colors hover:border-black/20 hover:bg-black/5 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:bg-white/10 dark:hover:text-white"
+        >
+          <ChevronDown
+            size={14}
+            className={`shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
           />
-        ))
+          {isExpanded ? '접기' : `전체 ${memos.length}개 보기`}
+        </button>
       )}
-    </ul>
+    </div>
   )
 }
 
@@ -314,7 +394,10 @@ const SidebarContent = ({
   memos: Memo[]
   activeMemoId: string | undefined
   handleMemoSelect: (memoId: string) => void
-}) => (
+}) => {
+  const [memoListExpanded, setMemoListExpanded] = useState(false)
+
+  return (
   <>
     <div className="flex h-10 shrink-0 items-center justify-between border-b border-black/20 px-4 dark:border-white/20">
       <div className="flex items-center gap-2 text-sm font-medium text-black dark:text-white">
@@ -331,8 +414,8 @@ const SidebarContent = ({
       </button>
     </div>
 
-    <div className="flex-1 overflow-y-auto px-3 py-4">
-      <section>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-4">
+      <section className="shrink-0">
         <p className="mb-2 px-2 text-xs font-medium text-black/50 dark:text-white/50">페이지</p>
         <ul className="space-y-1">
           {navItems.map(({ to, label, icon: Icon, end }) => (
@@ -356,9 +439,24 @@ const SidebarContent = ({
         </ul>
       </section>
 
-      <section className="mt-6">
-        <p className="mb-2 px-2 text-xs font-medium text-black/50 dark:text-white/50">메모</p>
-        <MemoList memos={memos} activeMemoId={activeMemoId} onSelect={handleMemoSelect} />
+      <section className="mt-6 flex min-h-0 flex-1 flex-col">
+        <div className="mb-2 flex shrink-0 items-center justify-between px-2">
+          <p className="text-xs font-medium text-black/50 dark:text-white/50">메모</p>
+          <div className="flex items-center gap-1.5">
+            {memos.length > 0 && (
+              <span className="text-[10px] tabular-nums text-black/40 dark:text-white/40">
+                {memos.length}개
+              </span>
+            )}
+          </div>
+        </div>
+        <MemoList
+          memos={memos}
+          activeMemoId={activeMemoId}
+          onSelect={handleMemoSelect}
+          isExpanded={memoListExpanded}
+          onExpandedChange={setMemoListExpanded}
+        />
       </section>
     </div>
 
@@ -366,7 +464,8 @@ const SidebarContent = ({
       <SidebarFooter />
     </div>
   </>
-)
+  )
+}
 
 const LeftSidebar = () => {
   const isOpen = useSidebarStore((state) => state.isOpen)
@@ -374,7 +473,16 @@ const LeftSidebar = () => {
   const memos = useMemoStore((state) => state.memos)
   const selectMemo = useMemoStore((state) => state.selectMemo)
   const navigate = useNavigate()
+  const location = useLocation()
   const { id: activeMemoId } = useParams()
+  const prevPathRef = useRef(location.pathname)
+
+  useEffect(() => {
+    if (prevPathRef.current !== location.pathname) {
+      close()
+      prevPathRef.current = location.pathname
+    }
+  }, [location.pathname, close])
 
   const handleMemoSelect = (memoId: string) => {
     selectMemo(memoId)

@@ -4,10 +4,13 @@ import {
   fetchMemo,
   fetchMemos,
   renameMemo as renameMemoApi,
-  saveMemoWords as saveMemoWordsApi,
+  saveMemoContent as saveMemoContentApi,
+  generateWordAiNote as generateWordAiNoteApi,
   type MemoResponse,
+  type MemoSegmentResponse,
   type MemoWordResponse,
 } from '../lib/api'
+import { useUsageStore } from './usageStore'
 
 export interface MemoSegment {
   start?: number
@@ -61,6 +64,11 @@ interface MemoState {
   ensureMemoLoaded: (id: string) => Promise<Memo>
   renameMemo: (id: string, title: string) => Promise<void>
   saveMemoWords: (id: string, words: MemoWord[]) => Promise<void>
+  saveMemoContent: (
+    id: string,
+    content: { words: MemoWord[]; segments: MemoSegment[] },
+  ) => Promise<void>
+  generateWordAiNote: (id: string, wordIndex: number) => Promise<string>
   saveWordNote: (id: string, wordIndex: number, note: string) => Promise<void>
   deleteMemo: (id: string) => Promise<void>
 }
@@ -71,6 +79,17 @@ function formatUpdatedAt(value: string) {
     month: '2-digit',
     day: '2-digit',
   })
+}
+
+function mapMemoSegments(segments: MemoSegmentResponse[] | undefined): MemoSegment[] | undefined {
+  if (!Array.isArray(segments) || segments.length === 0) return undefined
+
+  return segments.map((segment) => ({
+    start: segment.start,
+    end: segment.end,
+    text: segment.text?.trim() || undefined,
+    speaker: segment.speaker ?? undefined,
+  }))
 }
 
 function mapMemoWords(words: MemoWordResponse[] | undefined): MemoWord[] | undefined {
@@ -88,6 +107,7 @@ function mapMemoWords(words: MemoWordResponse[] | undefined): MemoWord[] | undef
 
 export function mapMemoResponse(memo: MemoResponse): Memo {
   const words = mapMemoWords(memo.words)
+  const segments = mapMemoSegments(memo.segments)
 
   return {
     id: memo.id,
@@ -100,8 +120,9 @@ export function mapMemoResponse(memo: MemoResponse): Memo {
     duration: memo.duration ?? undefined,
     language: memo.language ?? undefined,
     speakers: memo.speakers,
-    segmentCount: memo.segmentCount ?? undefined,
+    segmentCount: memo.segmentCount ?? segments?.length ?? undefined,
     wordCount: memo.wordCount ?? undefined,
+    segments,
     words,
     updatedAt: formatUpdatedAt(memo.updatedAt),
   }
@@ -183,7 +204,12 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
     })
   },
   saveMemoWords: async (id, words) => {
-    const memo = await saveMemoWordsApi(id, words)
+    const memo = getMemoById(id, get().memos)
+    const segments = memo?.segments ?? []
+    await get().saveMemoContent(id, { words, segments })
+  },
+  saveMemoContent: async (id, content) => {
+    const memo = await saveMemoContentApi(id, content)
     const savedWords = memo.words?.map((word, index) => ({
       id: word.id ?? index,
       word: word.word,
@@ -192,12 +218,39 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
       speaker: word.speaker ?? undefined,
       note: word.note?.trim() || undefined,
     }))
+    const savedSegments = mapMemoSegments(memo.segments)
     get().updateMemo(id, {
       words: savedWords,
+      segments: savedSegments,
       preview: memo.preview,
-      content: (savedWords ?? words).map((word) => word.word).join(' '),
+      segmentCount: memo.segmentCount ?? savedSegments?.length ?? undefined,
+      content: (savedWords ?? content.words).map((word) => word.word).join(' '),
       updatedAt: formatUpdatedAt(memo.updatedAt),
     })
+  },
+  generateWordAiNote: async (id, wordIndex) => {
+    const { note, memo, usage } = await generateWordAiNoteApi(id, wordIndex)
+    if (usage) {
+      useUsageStore.getState().setUsage(usage)
+    }
+    const savedWords = memo.words?.map((word, index) => ({
+      id: word.id ?? index,
+      word: word.word,
+      start: word.start,
+      end: word.end,
+      speaker: word.speaker ?? undefined,
+      note: word.note?.trim() || undefined,
+    }))
+    const savedSegments = mapMemoSegments(memo.segments)
+    get().updateMemo(id, {
+      words: savedWords,
+      segments: savedSegments,
+      preview: memo.preview,
+      segmentCount: memo.segmentCount ?? savedSegments?.length ?? undefined,
+      content: savedWords?.map((word) => word.word).join(' ') ?? '',
+      updatedAt: formatUpdatedAt(memo.updatedAt),
+    })
+    return note
   },
   saveWordNote: async (id, wordIndex, note) => {
     const memo = getMemoById(id, get().memos)

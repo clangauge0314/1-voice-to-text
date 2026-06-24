@@ -27,7 +27,7 @@ const MemoPage = () => {
   const ensureMemoLoaded = useMemoStore((state) => state.ensureMemoLoaded)
   const selectMemo = useMemoStore((state) => state.selectMemo)
   const renameMemo = useMemoStore((state) => state.renameMemo)
-  const saveMemoWords = useMemoStore((state) => state.saveMemoWords)
+  const saveMemoContent = useMemoStore((state) => state.saveMemoContent)
   const deleteMemo = useMemoStore((state) => state.deleteMemo)
   const clearWordSelection = useWordSelectionStore((state) => state.clearSelection)
   const setPlaybackTime = useMemoPlaybackStore((state) => state.setCurrentTime)
@@ -308,11 +308,14 @@ const MemoPage = () => {
           currentTime={currentTime}
           canSeek={!!audioUrl}
           onSeek={seekTo}
-          onSaveWords={async (words) => {
+          onSaveContent={async ({ words, segments }) => {
             try {
-              await saveMemoWords(memo.id, words)
+              await saveMemoContent(memo.id, {
+                words,
+                segments: segments.length > 0 ? segments : memo.segments ?? [],
+              })
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : '단어 저장에 실패했습니다.')
+              toast.error(err instanceof Error ? err.message : '전사 저장에 실패했습니다.')
               throw err
             }
           }}

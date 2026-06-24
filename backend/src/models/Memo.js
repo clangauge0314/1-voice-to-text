@@ -19,6 +19,7 @@ const memoSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     preview: { type: String, default: '', trim: true },
     words: { type: [mongoose.Schema.Types.Mixed], default: null },
+    segments: { type: [mongoose.Schema.Types.Mixed], default: null },
   },
   { timestamps: true },
 )
