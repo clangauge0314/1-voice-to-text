@@ -1,35 +1,42 @@
 import { motion } from 'framer-motion'
 import { Check, Loader2, Pencil, Trash2, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import MemoWaveformPlayer from '../components/MemoWaveformPlayer/MemoWaveformPlayer'
-import WordMemoEditor from '../components/WordMemoEditor/WordMemoEditor'
+import { ErrorBoundary } from '../components/ErrorBoundary'
+import MemoPageShell from '../components/RightSidebar/MemoPageShell'
+import MemoAudioPlayer from '../components/MemoWaveformPlayer/MemoWaveformPlayer'
+import MemoTranscriptEditor from '../components/MemoTranscriptEditor/MemoTranscriptEditor'
+import { resolveMemoAudioUrl } from '../lib/api'
 import { useMemoTranscript } from '../hooks/useMemoTranscript'
+import { useAuthStore } from '../stores/authStore'
 import { getMemoById, useMemoStore } from '../stores/memoStore'
+import { useMemoPlaybackStore } from '../stores/memoPlaybackStore'
+import { useWordSelectionStore } from '../stores/wordSelectionStore'
 import { useThemeStore } from '../stores/themeStore'
 import {
-  findActiveSegmentIndex,
   formatCount,
   formatDuration,
-  formatSpeakerLabel,
-  formatTimestamp,
-  getSpeakerColor,
-  SPEAKER_COLORS,
 } from '../utils/transcriptToMemo'
 
 const MemoPage = () => {
   const { id } = useParams()
   const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
   const memos = useMemoStore((state) => state.memos)
-  const memosLoading = useMemoStore((state) => state.loading)
+  const ensureMemoLoaded = useMemoStore((state) => state.ensureMemoLoaded)
   const selectMemo = useMemoStore((state) => state.selectMemo)
   const renameMemo = useMemoStore((state) => state.renameMemo)
   const saveMemoWords = useMemoStore((state) => state.saveMemoWords)
   const deleteMemo = useMemoStore((state) => state.deleteMemo)
+  const clearWordSelection = useWordSelectionStore((state) => state.clearSelection)
+  const setPlaybackTime = useMemoPlaybackStore((state) => state.setCurrentTime)
+  const resetPlayback = useMemoPlaybackStore((state) => state.resetPlayback)
   const memo = id ? getMemoById(id, memos) : undefined
   const { loading, error } = useMemoTranscript(memo)
   const theme = useThemeStore((state) => state.theme)
+
+  const [pageState, setPageState] = useState<'loading' | 'ready' | 'not-found'>('loading')
 
   const seekRef = useRef<((time: number) => void) | null>(null)
   const [currentTime, setCurrentTime] = useState(0)
@@ -37,31 +44,33 @@ const MemoPage = () => {
   const [titleDraft, setTitleDraft] = useState('')
   const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [viewMode, setViewMode] = useState<'segment' | 'word'>('segment')
-
-  const speakerColorMap = useMemo(() => {
-    const map = new Map<string, string>()
-    memo?.speakers?.forEach((speaker, index) => {
-      map.set(speaker, SPEAKER_COLORS[index % SPEAKER_COLORS.length])
-    })
-    return map
-  }, [memo?.speakers])
-
-  const activeSegmentIndex = useMemo(() => {
-    if (!memo?.segments?.length) return -1
-    return findActiveSegmentIndex(memo.segments, currentTime)
-  }, [memo?.segments, currentTime])
 
   useEffect(() => {
-    if (!memo) return
-    if ((memo.segments?.length ?? 0) > 0) {
-      setViewMode('segment')
-      return
+    resetPlayback()
+    return () => {
+      clearWordSelection()
+      resetPlayback()
     }
-    if ((memo.words?.length ?? 0) > 0) {
-      setViewMode('word')
+  }, [id, clearWordSelection, resetPlayback])
+
+  useEffect(() => {
+    if (!id || !user) return
+
+    let cancelled = false
+    setPageState('loading')
+
+    ensureMemoLoaded(id)
+      .then(() => {
+        if (!cancelled) setPageState('ready')
+      })
+      .catch(() => {
+        if (!cancelled) setPageState('not-found')
+      })
+
+    return () => {
+      cancelled = true
     }
-  }, [memo?.id, memo?.segments?.length, memo?.words?.length])
+  }, [id, user, ensureMemoLoaded])
 
   useEffect(() => {
     if (id && memo) selectMemo(id)
@@ -69,7 +78,8 @@ const MemoPage = () => {
 
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time)
-  }, [])
+    setPlaybackTime(time)
+  }, [setPlaybackTime])
 
   const seekTo = (seconds?: number) => {
     if (seconds == null || !seekRef.current) return
@@ -128,32 +138,46 @@ const MemoPage = () => {
 
   if (!id) return <Navigate to="/" replace />
 
-  if (!memo && memosLoading) {
+  if (!user) {
     return (
-      <div className="flex h-full items-center justify-center px-10 text-sm text-black/50 dark:text-white/50">
-        <Loader2 size={16} className="mr-2 animate-spin" />
-        메모를 불러오는 중...
-      </div>
+      <MemoPageShell>
+        <div className="flex h-full items-center justify-center px-10 text-sm text-black/50 dark:text-white/50">
+          <Loader2 size={16} className="mr-2 animate-spin" />
+          로그인 확인 중...
+        </div>
+      </MemoPageShell>
     )
   }
 
-  if (!memo) return <Navigate to="/" replace />
+  if (pageState === 'loading' || (pageState === 'ready' && !memo)) {
+    return (
+      <MemoPageShell>
+        <div className="flex h-full items-center justify-center px-10 text-sm text-black/50 dark:text-white/50">
+          <Loader2 size={16} className="mr-2 animate-spin" />
+          메모를 불러오는 중...
+        </div>
+      </MemoPageShell>
+    )
+  }
+
+  if (pageState === 'not-found' || !memo) return <Navigate to="/" replace />
 
   const durationLabel = formatDuration(memo.duration)
   const segmentCountLabel = formatCount(memo.segmentCount, '개 구간')
   const wordCountLabel = formatCount(memo.wordCount, '개 단어')
   const hasWords = (memo.words?.length ?? 0) > 0
   const hasSegments = (memo.segments?.length ?? 0) > 0
-  const canToggleView = hasWords && hasSegments
-  const isWordView = hasWords && (!hasSegments || viewMode === 'word')
+  const hasTranscript = hasWords || hasSegments
+  const audioUrl = memo ? resolveMemoAudioUrl(memo) : ''
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className="flex h-full min-h-0 flex-col overflow-hidden text-left"
-    >
+    <MemoPageShell>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="flex h-full min-h-0 flex-col overflow-hidden text-left"
+      >
       <div className="shrink-0 px-10 pt-12 pb-4 md:px-16 md:pt-14 lg:px-20 lg:pt-16">
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -250,15 +274,17 @@ const MemoPage = () => {
         </div>
       )}
 
-      {memo.audioUrl && (
+      {audioUrl && (
         <div className="mb-6 w-full min-w-0">
-          <MemoWaveformPlayer
-            audioUrl={memo.audioUrl}
-            title={memo.title}
-            theme={theme}
-            onTimeUpdate={handleTimeUpdate}
-            seekRef={seekRef}
-          />
+          <ErrorBoundary>
+            <MemoAudioPlayer
+              audioUrl={audioUrl}
+              title={memo.title}
+              theme={theme}
+              onTimeUpdate={handleTimeUpdate}
+              seekRef={seekRef}
+            />
+          </ErrorBoundary>
         </div>
       )}
 
@@ -272,40 +298,15 @@ const MemoPage = () => {
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-12 md:px-16 md:pb-14 lg:px-20 lg:pb-16">
-      {canToggleView && (
-        <div className="mb-4 inline-flex rounded-md border border-black/15 p-1 dark:border-white/15">
-          <button
-            type="button"
-            onClick={() => setViewMode('segment')}
-            className={`rounded px-3 py-1.5 text-xs transition-colors ${
-              viewMode === 'segment'
-                ? 'bg-black text-white dark:bg-white dark:text-black'
-                : 'text-black/60 hover:bg-black/5 dark:text-white/60 dark:hover:bg-white/10'
-            }`}
-          >
-            문장 보기
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('word')}
-            className={`rounded px-3 py-1.5 text-xs transition-colors ${
-              viewMode === 'word'
-                ? 'bg-black text-white dark:bg-white dark:text-black'
-                : 'text-black/60 hover:bg-black/5 dark:text-white/60 dark:hover:bg-white/10'
-            }`}
-          >
-            단어 편집
-          </button>
-        </div>
-      )}
-
-      {isWordView ? (
-        <WordMemoEditor
-          words={memo.words!}
+      <div className="scrollbar-modern min-h-0 flex-1 overflow-y-auto px-10 pb-12 md:px-16 md:pb-14 lg:px-20 lg:pb-16">
+      {hasTranscript ? (
+        <MemoTranscriptEditor
+          memoId={memo.id}
+          segments={memo.segments}
+          words={memo.words}
           speakers={memo.speakers ?? []}
           currentTime={currentTime}
-          canSeek={!!memo.audioUrl}
+          canSeek={!!audioUrl}
           onSeek={seekTo}
           onSaveWords={async (words) => {
             try {
@@ -316,58 +317,14 @@ const MemoPage = () => {
             }
           }}
         />
-      ) : hasSegments ? (
-        <div className="space-y-3">
-          {memo.segments!.map((segment, index) => {
-            const speakerIndex = memo.speakers?.indexOf(segment.speaker ?? '') ?? index
-            const speakerLabel = formatSpeakerLabel(segment.speaker, speakerIndex)
-            const speakerColor = getSpeakerColor(segment.speaker, speakerColorMap, speakerIndex)
-            const isActive = index === activeSegmentIndex
-
-            return (
-              <div
-                key={`${segment.start ?? index}-${index}`}
-                className={`rounded-md border px-4 py-3 transition-colors ${
-                  isActive
-                    ? 'border-black/30 bg-black/3 dark:border-white/30 dark:bg-white/4'
-                    : 'border-black/10 dark:border-white/10'
-                }`}
-              >
-                <div className="mb-1.5 flex items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => seekTo(segment.start)}
-                    disabled={!memo.audioUrl}
-                    className={`font-mono transition-colors ${
-                      memo.audioUrl
-                        ? 'text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white'
-                        : 'cursor-default text-black/40 dark:text-white/40'
-                    }`}
-                  >
-                    {formatTimestamp(segment.start)}
-                    {segment.end != null && (
-                      <span className="text-black/30 dark:text-white/30">
-                        {' '}
-                        – {formatTimestamp(segment.end)}
-                      </span>
-                    )}
-                  </button>
-                  <span className={`font-medium ${speakerColor}`}>{speakerLabel}</span>
-                </div>
-                <p className="text-sm leading-relaxed text-black dark:text-white">
-                  {segment.text}
-                </p>
-              </div>
-            )
-          })}
-        </div>
       ) : (
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-black dark:text-white">
           {memo.content}
         </p>
       )}
       </div>
-    </motion.div>
+      </motion.div>
+    </MemoPageShell>
   )
 }
 

@@ -2,6 +2,7 @@ import Memo from '../models/Memo.js'
 import Transcript from '../models/Transcript.js'
 import Upload from '../models/Upload.js'
 import { deleteAsset } from './cloudinaryUpload.js'
+import { buildPreviewFromWords, extractMemoWords } from './memoWords.js'
 
 function fileNameToTitle(fileName) {
   return fileName.replace(/\.[^.]+$/, '') || '새 메모'
@@ -21,12 +22,18 @@ export async function ensureMemoForTranscript({ userId, upload, transcript }) {
   const content = transcript.content ?? {}
   const title = fileNameToTitle(content.filename ?? upload.originalName)
   const preview = buildPreview(content)
+  const transcriptWords = extractMemoWords(content)
 
   let memo = await Memo.findOne({ upload: upload._id })
 
   if (memo) {
     memo.transcript = transcript._id
     memo.preview = preview
+    if ((!memo.words || memo.words.length === 0) && transcriptWords.length > 0) {
+      memo.words = transcriptWords
+      memo.preview = buildPreviewFromWords(transcriptWords)
+      memo.markModified('words')
+    }
     await memo.save()
     return memo
   }
@@ -36,7 +43,8 @@ export async function ensureMemoForTranscript({ userId, upload, transcript }) {
     upload: upload._id,
     transcript: transcript._id,
     title,
-    preview,
+    preview: transcriptWords.length > 0 ? buildPreviewFromWords(transcriptWords) : preview,
+    words: transcriptWords.length > 0 ? transcriptWords : null,
   })
 }
 

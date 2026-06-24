@@ -1,8 +1,10 @@
+import { Readable } from 'stream'
 import { Router } from 'express'
 import { authMiddleware } from '../middleware/auth.js'
 import { uploadAudio } from '../middleware/upload.js'
 import Upload from '../models/Upload.js'
 import { uploadBuffer } from '../utils/cloudinaryUpload.js'
+import { guessMimeType } from '../utils/downloadFile.js'
 import { toUploadResponse } from '../utils/serializers.js'
 
 const router = Router()
@@ -32,6 +34,24 @@ router.post('/audio', authMiddleware, uploadAudio.single('file'), async (req, re
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: '파일 업로드에 실패했습니다.' })
+  }
+})
+
+router.get('/:id/audio', authMiddleware, async (req, res) => {
+  try {
+    const upload = await Upload.findOne({ _id: req.params.id, user: req.user._id })
+
+    if (!upload) {
+      return res.status(404).json({ error: '업로드를 찾을 수 없습니다.' })
+    }
+
+    // Cloudinary CDN으로 리디렉션 (Range 요청, 미디어 스트리밍, CORS 처리를 Cloudinary에 위임)
+    res.redirect(upload.cloudinaryUrl)
+  } catch (err) {
+    console.error(err)
+    if (!res.headersSent) {
+      res.status(500).json({ error: '오디오 스트리밍에 실패했습니다.' })
+    }
   }
 })
 

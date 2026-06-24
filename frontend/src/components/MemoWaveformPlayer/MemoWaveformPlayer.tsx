@@ -1,11 +1,15 @@
-import { Loader2, Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
-import WaveSurfer from 'wavesurfer.js'
+import { toast } from 'sonner'
+// @ts-ignore
+import WaveformPlayer from '@arraypress/waveform-player'
+import '@arraypress/waveform-player/dist/waveform-player.css'
+import { useAuthStore } from '../../stores/authStore'
+import { useMemoPlaybackStore } from '../../stores/memoPlaybackStore'
 import type { Theme } from '../../stores/themeStore'
 import { formatTimestamp } from '../../utils/transcriptToMemo'
-import '../../styles/memoWaveformPlayer.css'
 
-interface MemoWaveformPlayerProps {
+interface MemoAudioPlayerProps {
   audioUrl: string
   title: string
   theme: Theme
@@ -13,199 +17,231 @@ interface MemoWaveformPlayerProps {
   seekRef: MutableRefObject<((time: number) => void) | null>
 }
 
-function getWaveColors(theme: Theme) {
-  if (theme === 'dark') {
-    return {
-      waveColor: 'rgba(255, 255, 255, 0.18)',
-      progressColor: '#ffffff',
-      cursorColor: '#ffffff',
-    }
-  }
+function buildAuthenticatedAudioUrl(audioUrl: string, token: string) {
+  if (!audioUrl) return ''
+  // Cloudinary 등 외부 URL인 경우 토큰을 붙이지 않음
+  if (audioUrl.startsWith('http')) return audioUrl
 
-  return {
-    waveColor: 'rgba(0, 0, 0, 0.12)',
-    progressColor: '#000000',
-    cursorColor: '#000000',
-  }
+  const absoluteUrl = `${window.location.origin}${audioUrl}`
+  const separator = absoluteUrl.includes('?') ? '&' : '?'
+  return `${absoluteUrl}${separator}token=${encodeURIComponent(token)}`
 }
 
-const MemoWaveformPlayer = ({
+const MemoAudioPlayer = ({
   audioUrl,
-  title,
   theme,
   onTimeUpdate,
   seekRef,
-}: MemoWaveformPlayerProps) => {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const waveSurferRef = useRef<WaveSurfer | null>(null)
+}: MemoAudioPlayerProps) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const playerInstanceRef = useRef<any>(null)
   const onTimeUpdateRef = useRef(onTimeUpdate)
+  const volumeRef = useRef(1)
+  const isMutedRef = useRef(false)
 
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isReady, setIsReady] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
+  const token = useAuthStore((state) => state.token)
+  const setIsPlaying = useMemoPlaybackStore((state) => state.setIsPlaying)
+  const authenticatedAudioUrl =
+    audioUrl && token ? buildAuthenticatedAudioUrl(audioUrl, token) : ''
+
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    volumeRef.current = volume
+  }, [volume])
+
+  useEffect(() => {
+    isMutedRef.current = isMuted
+  }, [isMuted])
 
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate
   }, [onTimeUpdate])
 
   useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    if (playerInstanceRef.current) {
+      playerInstanceRef.current.setVolume(isMuted ? 0 : volume)
+    }
+  }, [volume, isMuted])
 
-    let cancelled = false
-    const colors = getWaveColors(theme)
+  useEffect(() => {
+    if (!containerRef.current || !authenticatedAudioUrl) return
 
-    const waveSurfer = WaveSurfer.create({
-      container,
-      ...colors,
+    const waveformColor = 'rgba(0,0,0,0.3)'
+    const progressColor = '#000000'
+
+    const player = new WaveformPlayer(containerRef.current, {
+      url: authenticatedAudioUrl,
+      waveformStyle: 'bars',
+      height: 40,
       barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
-      cursorWidth: 2,
-      height: 72,
-      normalize: true,
-      fillParent: true,
-      mediaControls: false,
-      dragToSeek: true,
+      barSpacing: 2,
+      waveformColor,
+      progressColor,
+      buttonColor: progressColor,
+      showControls: true,
+      showInfo: false,
+      showTime: false,
+      preload: 'auto',
+      onLoad: (loadedPlayer: any) => {
+        loadedPlayer.setVolume(isMutedRef.current ? 0 : volumeRef.current)
+        if (loadedPlayer.audio?.duration) {
+          setDuration(loadedPlayer.audio.duration)
+        }
+      },
+      onTimeUpdate: (current: number, total: number) => {
+        setCurrentTime(current)
+        if (total) setDuration(total)
+        onTimeUpdateRef.current(current)
+      },
+      onPlay: () => setIsPlaying(true),
+      onPause: () => setIsPlaying(false),
+      onError: () => {
+        toast.error('오디오를 재생할 수 없습니다. 새로고침 후 다시 시도해주세요.')
+      },
     })
 
-    waveSurferRef.current = waveSurfer
+    // Cloudinary 등 외부 도메인일 경우 CORS를 위해 anonymous를 유지해야 할 수 있으나
+    // 브라우저에 따라 오디오 재생이 막히는 문제를 방지하기 위해 crossOrigin 속성을 제거합니다.
+    if (player.audio) {
+      player.audio.removeAttribute('crossorigin')
+      player.audio.removeAttribute('crossOrigin')
+      player.audio.preload = 'auto'
+      
+      // DOM에 오디오 요소를 숨김 상태로 추가 (일부 모바일 브라우저의 재생 버그 방지)
+      player.audio.style.position = 'absolute'
+      player.audio.style.width = '0'
+      player.audio.style.height = '0'
+      player.audio.style.opacity = '0'
+      containerRef.current.appendChild(player.audio)
 
-    const syncTime = () => {
-      const time = waveSurfer.getCurrentTime()
-      setCurrentTime(time)
-      onTimeUpdateRef.current(time)
+      player.audio.addEventListener('error', (e: any) => {
+        console.error('[Audio] Error:', player.audio?.error)
+      })
     }
 
-    waveSurfer.on('ready', () => {
-      if (cancelled) return
-      setIsReady(true)
-      setDuration(waveSurfer.getDuration())
-      syncTime()
-    })
-
-    waveSurfer.on('audioprocess', syncTime)
-    waveSurfer.on('timeupdate', syncTime)
-    waveSurfer.on('seeking', syncTime)
-    waveSurfer.on('play', () => setIsPlaying(true))
-    waveSurfer.on('pause', () => setIsPlaying(false))
-    waveSurfer.on('finish', () => setIsPlaying(false))
-
-    waveSurfer.load(audioUrl)
+    playerInstanceRef.current = player
+    player.setVolume(isMutedRef.current ? 0 : volumeRef.current)
 
     seekRef.current = (time: number) => {
-      const total = waveSurfer.getDuration()
-      if (!total || time < 0) return
-      waveSurfer.seekTo(Math.min(time / total, 1))
-      void waveSurfer.play()
+      if (playerInstanceRef.current) {
+        playerInstanceRef.current.seekTo(time)
+        void playerInstanceRef.current.play()?.catch(() => {
+          toast.error('해당 위치로 이동할 수 없습니다.')
+        })
+      }
     }
 
     return () => {
-      cancelled = true
-      seekRef.current = null
-      waveSurfer.destroy()
-      waveSurferRef.current = null
-      setIsReady(false)
       setIsPlaying(false)
-      setCurrentTime(0)
-      setDuration(0)
+      if (playerInstanceRef.current) {
+        // null 체크를 포함하여 destroy 시 발생할 수 있는 내부 오류 방지
+        try {
+          if (playerInstanceRef.current.audio) {
+            // 커스텀 리스너 직접 정리
+            playerInstanceRef.current.audio.onplay = null
+            playerInstanceRef.current.audio.onpause = null
+          }
+          if (typeof playerInstanceRef.current.destroy === 'function') {
+            playerInstanceRef.current.destroy()
+          }
+        } catch (e) {
+          // ignore destroy errors
+        }
+        playerInstanceRef.current = null
+      }
+      seekRef.current = null
     }
-  }, [audioUrl, theme, seekRef])
+  }, [authenticatedAudioUrl, seekRef, setIsPlaying])
 
-  useEffect(() => {
-    const waveSurfer = waveSurferRef.current
-    if (!waveSurfer) return
-    waveSurfer.setVolume(isMuted ? 0 : volume)
-  }, [volume, isMuted])
-
-  const togglePlay = () => {
-    const waveSurfer = waveSurferRef.current
-    if (!waveSurfer || !isReady) return
-    void waveSurfer.playPause()
-  }
-
-  const toggleMute = () => {
-    setIsMuted((prev) => !prev)
+  if (!authenticatedAudioUrl) {
+    return null
   }
 
   return (
-    <div className="memo-waveform-player-shell rounded-md border border-black/10 p-3 sm:p-4 dark:border-white/10">
-      <div className="flex flex-col gap-3">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <button
-            type="button"
-            onClick={togglePlay}
-            disabled={!isReady}
-            className="memo-waveform-player__play-btn flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/15 text-black transition-colors hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:text-white dark:hover:bg-white dark:hover:text-black"
-            aria-label={isPlaying ? '일시정지' : '재생'}
-          >
-            {!isReady ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : isPlaying ? (
-              <Pause size={18} />
-            ) : (
-              <Play size={18} className="ml-0.5" />
-            )}
-          </button>
+    <div className="flex flex-col gap-3 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:p-5 dark:border-white/10 dark:bg-neutral-950">
+      <style>{`
+        .waveform-player {
+          background: transparent !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          width: 100% !important;
+        }
+        .waveform-body {
+          flex-direction: row !important;
+          align-items: center !important;
+          gap: 1rem !important;
+          width: 100% !important;
+        }
+        .waveform-track {
+          flex: 1 !important;
+          gap: 1rem !important;
+          width: 100% !important;
+        }
+        .waveform-container {
+          flex: 1 !important;
+          width: 100% !important;
+        }
+        .waveform-info {
+          display: none !important;
+        }
+        .waveform-btn {
+          width: 40px !important;
+          height: 40px !important;
+          background: ${theme === 'dark' ? '#ffffff' : '#000000'} !important;
+          color: ${theme === 'dark' ? '#000000' : '#ffffff'} !important;
+          border-radius: 50% !important;
+          border: none !important;
+          flex-shrink: 0 !important;
+        }
+        .waveform-container canvas {
+          filter: ${theme === 'dark' ? 'invert(1) hue-rotate(180deg)' : 'none'} !important;
+          width: 100% !important;
+        }
+      `}</style>
 
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-black dark:text-white">{title}</p>
-            <p className="mt-0.5 font-mono text-xs text-black/50 dark:text-white/50">
-              {formatTimestamp(currentTime)}
-              <span className="mx-1 text-black/30 dark:text-white/30">/</span>
-              {formatTimestamp(duration)}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleMute}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-black/70 transition-colors hover:bg-black/5 hover:text-black sm:hidden dark:text-white/70 dark:hover:bg-white/10 dark:hover:text-white"
-            aria-label={isMuted ? '음소거 해제' : '음소거'}
-          >
-            {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-          </button>
-
-          <div className="memo-waveform-player__volume hidden shrink-0 items-center gap-2 sm:flex">
-            <button
-              type="button"
-              onClick={toggleMute}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-black/70 transition-colors hover:bg-black/5 hover:text-black dark:text-white/70 dark:hover:bg-white/10 dark:hover:text-white"
-              aria-label={isMuted ? '음소거 해제' : '음소거'}
-            >
-              {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={isMuted ? 0 : volume}
-              onChange={(event) => {
-                const next = Number(event.target.value)
-                setVolume(next)
-                if (next > 0) setIsMuted(false)
-              }}
-              className="memo-waveform-player__volume-slider w-20"
-              aria-label="볼륨"
-            />
-          </div>
-        </div>
-
-        <div
-          ref={containerRef}
-          className="memo-waveform-player__waveform w-full min-h-[72px] overflow-hidden rounded-md"
-        />
+      <div className="flex w-full items-center">
+        <div ref={containerRef} className="w-full" />
       </div>
 
-      <p className="mt-2 text-xs text-black/45 dark:text-white/45">
-        웨이브폼 또는 단어를 클릭하면 해당 위치로 이동합니다.
-      </p>
+      <div className="flex items-center justify-between px-1">
+        <div className="font-mono text-xs font-medium text-black/60 dark:text-white/60">
+          {formatTimestamp(currentTime)}
+          <span className="mx-1 text-black/30 dark:text-white/30">/</span>
+          {formatTimestamp(duration)}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsMuted(!isMuted)}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-black/60 transition-colors hover:bg-black/5 hover:text-black dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white"
+            aria-label={isMuted ? '음소거 해제' : '음소거'}
+          >
+            {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={isMuted ? 0 : volume}
+            onChange={(event) => {
+              const next = Number(event.target.value)
+              setVolume(next)
+              if (next > 0) setIsMuted(false)
+            }}
+            className="hidden w-20 accent-black sm:block dark:accent-white"
+            aria-label="볼륨"
+          />
+        </div>
+      </div>
     </div>
   )
 }
 
-export default MemoWaveformPlayer
+export default MemoAudioPlayer

@@ -104,6 +104,7 @@ export interface MemoWordResponse {
   start?: number
   end?: number
   speaker?: string | null
+  note?: string
 }
 
 export interface MemoResponse {
@@ -121,6 +122,16 @@ export interface MemoResponse {
   words?: MemoWordResponse[]
   createdAt: string
   updatedAt: string
+}
+
+export function getUploadAudioUrl(uploadId: string) {
+  return `/api/uploads/${uploadId}/audio`
+}
+
+export function resolveMemoAudioUrl(memo: { uploadId: string; audioUrl?: string }) {
+  if (memo.audioUrl) return memo.audioUrl
+  if (memo.uploadId) return getUploadAudioUrl(memo.uploadId)
+  return ''
 }
 
 export function uploadAudio(file: File, onProgress?: (percent: number) => void) {
@@ -204,6 +215,7 @@ export function saveMemoWords(
     start?: number
     end?: number
     speaker?: string
+    note?: string
   }>,
 ) {
   return apiFetch<MemoResponse>(`/memos/${id}`, {

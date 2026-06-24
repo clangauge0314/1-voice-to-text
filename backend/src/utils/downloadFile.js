@@ -11,7 +11,7 @@ const MIME_BY_EXT = {
   '.mkv': 'video/x-matroska',
 }
 
-function guessMimeType(filename, headerType) {
+export function guessMimeType(filename, headerType) {
   if (headerType && headerType !== 'application/octet-stream') {
     return headerType
   }

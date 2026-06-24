@@ -5,9 +5,9 @@
 
 .memo-waveform-player__waveform {
   width: 100%;
+  min-width: 0;
 }
 
-.memo-waveform-player__waveform wave,
 .memo-waveform-player__waveform > div {
   width: 100% !important;
 }
@@ -56,9 +56,5 @@ html.dark .memo-waveform-player__volume-slider::-moz-range-thumb {
   .memo-waveform-player__play-btn {
     height: 2.25rem;
     width: 2.25rem;
-  }
-
-  .memo-waveform-player__waveform {
-    min-height: 56px;
   }
 }

@@ -2,13 +2,18 @@ import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 
 export async function authMiddleware(req, res, next) {
+  let token = null
   const authHeader = req.headers.authorization
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: '인증이 필요합니다.' })
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice(7)
+  } else if (req.query.token) {
+    token = req.query.token
   }
 
-  const token = authHeader.slice(7)
+  if (!token) {
+    return res.status(401).json({ error: '인증이 필요합니다.' })
+  }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET)

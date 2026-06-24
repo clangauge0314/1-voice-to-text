@@ -8,7 +8,23 @@ import {
   deleteMemoResources,
   ensureMemoForTranscript,
 } from '../utils/memo.js'
+import { buildPreviewFromWords, extractMemoWords, normalizeMemoWord } from '../utils/memoWords.js'
 import { toMemoResponse } from '../utils/serializers.js'
+
+async function ensureMemoWordsFromTranscript(bundle) {
+  if (Array.isArray(bundle.memo.words) && bundle.memo.words.length > 0) {
+    return bundle.memo
+  }
+
+  const words = extractMemoWords(bundle.transcript.content ?? {})
+  if (words.length === 0) return bundle.memo
+
+  bundle.memo.words = words
+  bundle.memo.preview = buildPreviewFromWords(words)
+  bundle.memo.markModified('words')
+  await bundle.memo.save()
+  return bundle.memo
+}
 
 const router = Router()
 
@@ -67,6 +83,8 @@ router.get('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: '메모를 찾을 수 없습니다.' })
     }
 
+    await ensureMemoWordsFromTranscript(bundle)
+
     res.json(toMemoResponse(bundle.memo, bundle.upload, bundle.transcript, { includeWords: true }))
   } catch (err) {
     console.error(err)
@@ -100,13 +118,7 @@ router.patch('/:id', authMiddleware, async (req, res) => {
       }
 
       bundle.memo.words = words
-        .map((word, index) => ({
-          id: typeof word.id === 'number' ? word.id : index,
-          word: typeof word.word === 'string' ? word.word.trim() : '',
-          start: word.start,
-          end: word.end,
-          speaker: word.speaker ?? null,
-        }))
+        .map((word, index) => normalizeMemoWord(word, index))
         .filter((word) => word.word)
 
       const previewText = bundle.memo.words
@@ -118,6 +130,8 @@ router.patch('/:id', authMiddleware, async (req, res) => {
       if (previewText) {
         bundle.memo.preview = previewText
       }
+
+      bundle.memo.markModified('words')
     }
 
     await bundle.memo.save()

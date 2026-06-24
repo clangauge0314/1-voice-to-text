@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 import {
   deleteMemo as deleteMemoApi,
+  fetchMemo,
   fetchMemos,
   renameMemo as renameMemoApi,
   saveMemoWords as saveMemoWordsApi,
   type MemoResponse,
+  type MemoWordResponse,
 } from '../lib/api'
 
 export interface MemoSegment {
@@ -20,6 +22,7 @@ export interface MemoWord {
   start?: number
   end?: number
   speaker?: string
+  note?: string
 }
 
 export interface Memo {
@@ -55,8 +58,10 @@ interface MemoState {
   selectMemo: (id: string) => void
   clearSelection: () => void
   loadMemos: () => Promise<void>
+  ensureMemoLoaded: (id: string) => Promise<Memo>
   renameMemo: (id: string, title: string) => Promise<void>
   saveMemoWords: (id: string, words: MemoWord[]) => Promise<void>
+  saveWordNote: (id: string, wordIndex: number, note: string) => Promise<void>
   deleteMemo: (id: string) => Promise<void>
 }
 
@@ -68,12 +73,27 @@ function formatUpdatedAt(value: string) {
   })
 }
 
+function mapMemoWords(words: MemoWordResponse[] | undefined): MemoWord[] | undefined {
+  if (!Array.isArray(words) || words.length === 0) return undefined
+
+  return words.map((word, index) => ({
+    id: typeof word.id === 'number' ? word.id : index,
+    word: word.word,
+    start: word.start,
+    end: word.end,
+    speaker: word.speaker ?? undefined,
+    note: word.note?.trim() || undefined,
+  }))
+}
+
 export function mapMemoResponse(memo: MemoResponse): Memo {
+  const words = mapMemoWords(memo.words)
+
   return {
     id: memo.id,
     title: memo.title,
     preview: memo.preview,
-    content: '',
+    content: words ? words.map((word) => word.word).join(' ') : '',
     transcriptId: memo.transcriptId,
     uploadId: memo.uploadId,
     audioUrl: memo.audioUrl,
@@ -82,8 +102,37 @@ export function mapMemoResponse(memo: MemoResponse): Memo {
     speakers: memo.speakers,
     segmentCount: memo.segmentCount ?? undefined,
     wordCount: memo.wordCount ?? undefined,
+    words,
     updatedAt: formatUpdatedAt(memo.updatedAt),
   }
+}
+
+async function waitForMemoListLoad(getLoading: () => boolean) {
+  for (let attempt = 0; attempt < 100 && getLoading(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+function mergeMemoList(existingMemos: Memo[], incomingMemos: Memo[]): Memo[] {
+  const existingById = new Map(existingMemos.map((memo) => [memo.id, memo]))
+
+  return incomingMemos.map((memo) => {
+    const existing = existingById.get(memo.id)
+    if (!existing) return memo
+
+    return {
+      ...memo,
+      words: existing.words ?? memo.words,
+      segments: existing.segments ?? memo.segments,
+      speakers: existing.speakers?.length ? existing.speakers : memo.speakers,
+      audioUrl: existing.audioUrl ?? memo.audioUrl,
+      content: existing.content || memo.content,
+      duration: existing.duration ?? memo.duration,
+      language: existing.language ?? memo.language,
+      segmentCount: existing.segmentCount ?? memo.segmentCount,
+      wordCount: existing.wordCount ?? memo.wordCount,
+    }
+  })
 }
 
 export const useMemoStore = create<MemoState>()((set, get) => ({
@@ -112,10 +161,19 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
     set({ loading: true })
     try {
       const { memos } = await fetchMemos()
-      set({ memos: memos.map(mapMemoResponse) })
+      const incoming = memos.map(mapMemoResponse)
+      set({ memos: mergeMemoList(get().memos, incoming) })
     } finally {
       set({ loading: false })
     }
+  },
+  ensureMemoLoaded: async (id) => {
+    await waitForMemoListLoad(() => get().loading)
+
+    const response = await fetchMemo(id)
+    const memo = mapMemoResponse(response)
+    get().upsertMemo(memo)
+    return memo
   },
   renameMemo: async (id, title) => {
     const memo = await renameMemoApi(id, title)
@@ -132,6 +190,7 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
       start: word.start,
       end: word.end,
       speaker: word.speaker ?? undefined,
+      note: word.note?.trim() || undefined,
     }))
     get().updateMemo(id, {
       words: savedWords,
@@ -139,6 +198,17 @@ export const useMemoStore = create<MemoState>()((set, get) => ({
       content: (savedWords ?? words).map((word) => word.word).join(' '),
       updatedAt: formatUpdatedAt(memo.updatedAt),
     })
+  },
+  saveWordNote: async (id, wordIndex, note) => {
+    const memo = getMemoById(id, get().memos)
+    if (!memo?.words || wordIndex < 0 || wordIndex >= memo.words.length) return
+
+    const trimmed = note.trim()
+    const nextWords = memo.words.map((word, index) =>
+      index === wordIndex ? { ...word, note: trimmed || undefined } : word,
+    )
+
+    await get().saveMemoWords(id, nextWords)
   },
   deleteMemo: async (id) => {
     await deleteMemoApi(id)

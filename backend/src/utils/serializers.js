@@ -1,7 +1,20 @@
+function toUploadAudioPath(uploadId) {
+  return `/api/uploads/${uploadId.toString()}/audio`
+}
+
+function getAudioUrlWithExtension(upload) {
+  if (!upload || !upload.cloudinaryUrl) return ''
+  let url = upload.cloudinaryUrl
+  if (upload.format && !url.match(/\.[a-zA-Z0-9]+$/)) {
+    url += `.${upload.format}`
+  }
+  return url
+}
+
 export function toUploadResponse(record) {
   return {
     id: record._id.toString(),
-    url: record.cloudinaryUrl,
+    url: getAudioUrlWithExtension(record),
     publicId: record.publicId,
     originalName: record.originalName,
     duration: record.duration,
@@ -34,7 +47,7 @@ export function toMemoResponse(memo, upload, transcript, options = {}) {
     preview: memo.preview,
     uploadId: upload._id.toString(),
     transcriptId: transcript._id.toString(),
-    audioUrl: upload.cloudinaryUrl,
+    audioUrl: getAudioUrlWithExtension(upload),
     duration: content.duration ?? upload.duration ?? null,
     language: content.language ?? null,
     speakers: Array.isArray(content.speakers) ? content.speakers : [],

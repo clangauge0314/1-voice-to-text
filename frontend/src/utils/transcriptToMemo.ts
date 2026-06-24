@@ -91,6 +91,13 @@ export function formatTimestamp(seconds?: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
+export function formatPreciseTimestamp(seconds?: number): string {
+  if (seconds == null || Number.isNaN(seconds)) return '-'
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${String(minutes).padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`
+}
+
 export function formatSpeakerLabel(speaker: string | undefined, _index = 0): string {
   if (!speaker || speaker === UNKNOWN_SPEAKER || speaker === 'UNKNOWN') {
     return '미확인 화자'
@@ -163,6 +170,44 @@ export function toMemoWords(words: TranscriptContent['words']): MemoWord[] {
     .filter((word) => word.word)
 }
 
+export function groupWordsBySegments(
+  segments: MemoSegment[],
+  words: MemoWord[],
+): Array<{ segmentIndex: number; segment: MemoSegment; wordIndices: number[] }> {
+  if (!segments.length) return []
+
+  const groups = segments.map((segment, segmentIndex) => ({
+    segmentIndex,
+    segment,
+    wordIndices: [] as number[],
+  }))
+
+  if (!words.length) return groups
+
+  words.forEach((word, wordIndex) => {
+    if (word.start == null) return
+
+    let segmentIndex = segments.findIndex(
+      (segment) =>
+        segment.start != null &&
+        segment.end != null &&
+        word.start! >= segment.start &&
+        word.start! < segment.end,
+    )
+
+    if (segmentIndex < 0) {
+      segmentIndex = segments.reduce((best, segment, index) => {
+        if (segment.start == null || word.start! < segment.start) return best
+        return index
+      }, 0)
+    }
+
+    groups[segmentIndex].wordIndices.push(wordIndex)
+  })
+
+  return groups
+}
+
 export function findActiveWordIndex(words: MemoWord[], currentTime: number): number {
   if (!words.length) return -1
 
@@ -196,6 +241,131 @@ export function buildReadableContentFromWords(words: MemoWord[]): string {
     .map((word) => word.word.trim())
     .filter(Boolean)
     .join(' ')
+}
+
+export function reindexMemoWords(words: MemoWord[]): MemoWord[] {
+  return words.map((word, index) => ({ ...word, id: index }))
+}
+
+export function mergeWordNotes(words: MemoWord[]): string | undefined {
+  const notes = words.map((word) => word.note?.trim()).filter(Boolean)
+  if (notes.length === 0) return undefined
+  return notes.join('\n\n')
+}
+
+export function canMergeWordIndices(a: number, b: number): boolean {
+  if (a < 0 || b < 0 || a === b) return false
+  return Math.abs(a - b) === 1
+}
+
+export function canMergeSelectedIndices(indices: number[]): boolean {
+  if (indices.length < 2) return false
+
+  const sorted = [...indices].sort((a, b) => a - b)
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index] !== sorted[index - 1] + 1) return false
+  }
+
+  return true
+}
+
+export function mergeAdjacentWords(
+  words: MemoWord[],
+  firstIndex: number,
+  secondIndex: number,
+): MemoWord[] {
+  const left = Math.min(firstIndex, secondIndex)
+  const right = Math.max(firstIndex, secondIndex)
+
+  return mergeWordRange(words, Array.from({ length: right - left + 1 }, (_, index) => left + index))
+}
+
+export function mergeWordRange(words: MemoWord[], indices: number[]): MemoWord[] {
+  if (!canMergeSelectedIndices(indices)) return words
+
+  const sorted = [...indices].sort((a, b) => a - b)
+  const left = sorted[0]
+  const right = sorted[sorted.length - 1]
+  const slice = words.slice(left, right + 1)
+
+  const merged: MemoWord = {
+    id: slice[0].id,
+    word: slice.map((word) => word.word.trim()).filter(Boolean).join(' '),
+    start: slice[0].start ?? slice.find((word) => word.start != null)?.start,
+    end: slice[slice.length - 1].end ?? [...slice].reverse().find((word) => word.end != null)?.end,
+    speaker: slice[0].speaker ?? slice.find((word) => word.speaker)?.speaker,
+    note: mergeWordNotes(slice),
+  }
+
+  const next = [...words]
+  next.splice(left, sorted.length, merged)
+  return reindexMemoWords(next)
+}
+
+export function canSplitWord(word: MemoWord | undefined): boolean {
+  if (!word?.word?.trim()) return false
+  return /\s/.test(word.word.trim())
+}
+
+function splitWordIntoParts(word: MemoWord): MemoWord[] {
+  const parts = word.word.trim().split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return [word]
+
+  const { start, end, speaker, note } = word
+  if (start == null || end == null || end <= start) {
+    return parts.map((part, index) => ({
+      id: 0,
+      word: part,
+      start: word.start,
+      end: word.end,
+      speaker,
+      note: index === 0 ? note : undefined,
+    }))
+  }
+
+  const totalChars = parts.reduce((sum, part) => sum + part.length, 0)
+  let elapsed = 0
+
+  return parts.map((part, index) => {
+    elapsed += part.length
+    const partStart =
+      index === 0 ? start : start + ((end - start) * (elapsed - part.length)) / totalChars
+    const partEnd = index === parts.length - 1 ? end : start + ((end - start) * elapsed) / totalChars
+
+    return {
+      id: 0,
+      word: part,
+      start: partStart,
+      end: partEnd,
+      speaker,
+      note: index === 0 ? note : undefined,
+    }
+  })
+}
+
+export function splitWordAtIndex(words: MemoWord[], index: number): MemoWord[] {
+  if (index < 0 || index >= words.length) return words
+  if (!canSplitWord(words[index])) return words
+
+  const next = [...words]
+  next.splice(index, 1, ...splitWordIntoParts(words[index]))
+  return reindexMemoWords(next)
+}
+
+export function canSplitSelectedIndices(words: MemoWord[], indices: number[]): boolean {
+  if (!indices.length) return false
+  return indices.some((index) => canSplitWord(words[index]))
+}
+
+export function splitWordsAtIndices(words: MemoWord[], indices: number[]): MemoWord[] {
+  if (!canSplitSelectedIndices(words, indices)) return words
+
+  const indexSet = new Set(indices)
+  const next = words.flatMap((word, index) =>
+    indexSet.has(index) && canSplitWord(word) ? splitWordIntoParts(word) : [word],
+  )
+
+  return reindexMemoWords(next)
 }
 
 export function buildPreviewFromWords(words: MemoWord[]): string {
