@@ -14,7 +14,6 @@ const ACCEPTED_EXTENSIONS = /\.(mp3|wav|ogg|m4a|aac|flac|webm|mp4|mov|mkv)$/i
 
 const UsageProgress = () => {
   const user = useAuthStore((state) => state.user)
-  const planLabel = useUsageStore((state) => state.getPlanLabel())
   const usedMinutes = useUsageStore((state) => state.usedMinutes)
   const totalMinutes = useUsageStore((state) => state.getTotalMinutes())
   const remainingMinutes = useUsageStore((state) => state.getRemainingMinutes())
@@ -28,15 +27,12 @@ const UsageProgress = () => {
     <section className="mb-8 rounded-lg border border-black/20 p-5 dark:border-white/20">
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <p className="text-base font-semibold text-black dark:text-white">이번 달 사용량</p>
+          <p className="text-base font-semibold text-black dark:text-white">크레딧 사용량</p>
           <p className="mt-1 text-sm text-black/50 dark:text-white/50">
             {user ? (
-              <>
-                <span className="font-medium text-black/70 dark:text-white/70">{user.name}</span>
-                <span> · {planLabel} 플랜</span>
-              </>
+              <span className="font-medium text-black/70 dark:text-white/70">{user.name}</span>
             ) : (
-              '비로그인 · Free 체험'
+              '비로그인 · 기본 크레딧'
             )}
           </p>
         </div>
@@ -59,7 +55,7 @@ const UsageProgress = () => {
             />
           </div>
           <p className="mt-2 text-sm text-black/50 dark:text-white/50">
-            남은 시간 <span className="font-medium text-black/70 dark:text-white/70">{formatMinutes(remainingMinutes)}</span>
+            보유 음성분석 시간 <span className="font-medium text-black/70 dark:text-white/70">{formatMinutes(remainingMinutes)}</span>
           </p>
         </div>
 
@@ -79,7 +75,7 @@ const UsageProgress = () => {
             />
           </div>
           <p className="mt-2 text-sm text-black/50 dark:text-white/50">
-            남은 횟수 <span className="font-medium text-black/70 dark:text-white/70">{formatAiNotes(remainingAiNotes)}</span>
+            보유 AI 학습 메모 <span className="font-medium text-black/70 dark:text-white/70">{formatAiNotes(remainingAiNotes)}</span>
           </p>
         </div>
       </div>
@@ -356,7 +352,7 @@ const HomePage = () => {
             ? 'cursor-wait border-black/20 opacity-80 dark:border-white/20'
             : isDragging
               ? 'border-black bg-black/5 dark:border-white dark:bg-white/5'
-              : 'border-black/20 hover:bg-black/[0.02] dark:border-white/20 dark:hover:bg-white/[0.02]'
+              : 'border-black/20 hover:bg-black/2 dark:border-white/20 dark:hover:bg-white/2'
         }`}
       >
         <input
@@ -434,7 +430,7 @@ const HomePage = () => {
               <li key={memo.id}>
                 <Link
                   to={`/memo/${memo.id}`}
-                  className="group flex items-center justify-between py-4 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+                  className="group flex items-center justify-between py-4 transition-colors hover:bg-black/2 dark:hover:bg-white/2"
                 >
                   <div className="min-w-0 flex-1 pr-4">
                     <p className="truncate text-base font-medium text-black dark:text-white">

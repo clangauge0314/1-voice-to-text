@@ -1,23 +1,8 @@
-import { getPlanConfig, normalizePlan } from '../constants/plans.js'
-
-export function getStartOfMonth(date = new Date()) {
-  const d = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date()
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
-}
-
-export function shouldResetUsage(usagePeriodStart) {
-  const periodStart = getStartOfMonth(usagePeriodStart)
-  const currentStart = getStartOfMonth()
-  return periodStart.getTime() < currentStart.getTime()
-}
+const CREDIT_MODE_PLAN = 'credit'
 
 /** 초 → 분 (소수 1자리, UI 표시용) */
 export function secondsToDisplayMinutes(seconds) {
   return Math.round((seconds / 60) * 10) / 10
-}
-
-export function getMonthlyLimitSeconds(plan) {
-  return getPlanConfig(plan).monthlyMinutes * 60
 }
 
 export function getUsedSeconds(user) {
@@ -28,16 +13,14 @@ export function getUsedSeconds(user) {
 }
 
 export function getRemainingSeconds(user) {
-  const limitSeconds = getMonthlyLimitSeconds(user.plan)
-  return Math.max(0, limitSeconds - getUsedSeconds(user))
+  return Math.max(0, Number(user.audioSecondsBalance ?? 0))
 }
 
 export async function ensureCurrentPeriod(user) {
   let needsSave = false
 
-  const normalizedPlan = normalizePlan(user.plan)
-  if (user.plan !== normalizedPlan) {
-    user.plan = normalizedPlan
+  if (user.plan !== CREDIT_MODE_PLAN) {
+    user.plan = CREDIT_MODE_PLAN
     needsSave = true
   }
 
@@ -54,21 +37,23 @@ export async function ensureCurrentPeriod(user) {
     needsSave = true
   }
 
-  if (user.usedAiNotes == null) {
+  if (user.usedAiNotes == null || user.usedAiNotes < 0) {
     user.usedAiNotes = 0
+    needsSave = true
+  }
+
+  if (user.audioSecondsBalance == null || user.audioSecondsBalance < 0) {
+    user.audioSecondsBalance = 0
+    needsSave = true
+  }
+
+  if (user.aiNotesBalance == null || user.aiNotesBalance < 0) {
+    user.aiNotesBalance = 0
     needsSave = true
   }
 
   if (!user.usagePeriodStart) {
-    user.usagePeriodStart = getStartOfMonth()
-    needsSave = true
-  }
-
-  if (shouldResetUsage(user.usagePeriodStart)) {
-    user.usedMinutes = 0
-    user.usedSeconds = 0
-    user.usedAiNotes = 0
-    user.usagePeriodStart = getStartOfMonth()
+    user.usagePeriodStart = user.createdAt ?? new Date()
     needsSave = true
   }
 
@@ -82,14 +67,13 @@ export async function ensureCurrentPeriod(user) {
 export function assertTranscriptionAvailable(user, requiredSeconds) {
   if (!requiredSeconds || requiredSeconds <= 0) return
 
-  const plan = getPlanConfig(user.plan)
   const remainingSeconds = getRemainingSeconds(user)
 
   if (requiredSeconds > remainingSeconds) {
     const requiredMinutes = secondsToDisplayMinutes(requiredSeconds)
     const remainingMinutes = secondsToDisplayMinutes(remainingSeconds)
     const error = new Error(
-      `이번 달 음성 분석 한도가 부족합니다. (필요 ${requiredMinutes}분 · 남은 ${remainingMinutes}분)`,
+      `보유한 음성 크레딧이 부족합니다. (필요 ${requiredMinutes}분 · 남은 ${remainingMinutes}분)`,
     )
     error.statusCode = 403
     throw error
@@ -99,42 +83,53 @@ export function assertTranscriptionAvailable(user, requiredSeconds) {
 export async function consumeTranscriptionSeconds(user, seconds) {
   if (!seconds || seconds <= 0) return user
 
+  const currentBalance = Math.max(0, Number(user.audioSecondsBalance ?? 0))
+  if (seconds > currentBalance) {
+    const error = new Error('보유한 음성 크레딧이 부족합니다.')
+    error.statusCode = 403
+    throw error
+  }
+
   const usedSeconds = getUsedSeconds(user) + seconds
   user.usedSeconds = usedSeconds
   user.usedMinutes = secondsToDisplayMinutes(usedSeconds)
+  user.audioSecondsBalance = currentBalance - seconds
   await user.save()
   return user
 }
 
 export function assertAiNoteAvailable(user) {
-  const plan = getPlanConfig(user.plan)
-  const usedAiNotes = user.usedAiNotes ?? 0
-
-  if (usedAiNotes >= plan.monthlyAiNotes) {
-    const error = new Error(
-      `이번 달 AI 메모 한도(${plan.monthlyAiNotes}회)를 모두 사용했습니다. 멤버십을 업그레이드해주세요.`,
-    )
+  const balance = Number(user.aiNotesBalance ?? 0)
+  if (balance <= 0) {
+    const error = new Error('보유한 AI 메모 크레딧이 부족합니다. 충전 후 다시 시도해주세요.')
     error.statusCode = 403
     throw error
   }
 }
 
 export async function consumeAiNote(user) {
+  const balance = Number(user.aiNotesBalance ?? 0)
+  if (balance <= 0) {
+    const error = new Error('보유한 AI 메모 크레딧이 부족합니다.')
+    error.statusCode = 403
+    throw error
+  }
+
   user.usedAiNotes = (user.usedAiNotes ?? 0) + 1
+  user.aiNotesBalance = balance - 1
   await user.save()
   return user
 }
 
 export function toUsageResponse(user) {
-  const plan = getPlanConfig(user.plan)
   const usedSeconds = getUsedSeconds(user)
-  const totalSeconds = getMonthlyLimitSeconds(user.plan)
-  const remainingSeconds = Math.max(0, totalSeconds - usedSeconds)
+  const remainingSeconds = Math.max(0, Number(user.audioSecondsBalance ?? 0))
+  const totalSeconds = usedSeconds + remainingSeconds
   const usedAiNotes = user.usedAiNotes ?? 0
-  const totalAiNotes = plan.monthlyAiNotes
-  const remainingAiNotes = Math.max(0, totalAiNotes - usedAiNotes)
+  const remainingAiNotes = Math.max(0, Number(user.aiNotesBalance ?? 0))
+  const totalAiNotes = usedAiNotes + remainingAiNotes
   const usedMinutes = secondsToDisplayMinutes(usedSeconds)
-  const totalMinutes = plan.monthlyMinutes
+  const totalMinutes = secondsToDisplayMinutes(totalSeconds)
   const remainingMinutes = secondsToDisplayMinutes(remainingSeconds)
   const usagePercent =
     totalSeconds === 0 ? 0 : Math.min(100, Math.round((usedSeconds / totalSeconds) * 100))
@@ -142,8 +137,7 @@ export function toUsageResponse(user) {
     totalAiNotes === 0 ? 0 : Math.min(100, Math.round((usedAiNotes / totalAiNotes) * 100))
 
   return {
-    plan: normalizePlan(user.plan),
-    planLabel: plan.label,
+    plan: CREDIT_MODE_PLAN,
     usedMinutes,
     totalMinutes,
     remainingMinutes,
@@ -156,5 +150,7 @@ export function toUsageResponse(user) {
     remainingAiNotes,
     aiUsagePercent,
     usagePeriodStart: user.usagePeriodStart,
+    audioSecondsBalance: remainingSeconds,
+    aiNotesBalance: remainingAiNotes,
   }
 }

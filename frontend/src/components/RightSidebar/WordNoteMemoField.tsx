@@ -63,7 +63,7 @@ const WordNoteMemoField = ({
               disabled={isSaving || aiLimitReached}
               title={
                 aiLimitReached
-                  ? '이번 달 AI 메모를 모두 사용했습니다'
+                  ? '보유한 AI 메모 크레딧을 모두 사용했습니다'
                   : 'AI가 문장 맥락을 읽고 메모 작성'
               }
               onClick={() => void handleGenerate()}
@@ -74,7 +74,7 @@ const WordNoteMemoField = ({
               to="/membership"
               className="text-[10px] font-medium text-black/55 underline underline-offset-2 transition-colors hover:text-black dark:text-white/55 dark:hover:text-white"
             >
-              AI 메모 한도 초과 · 플랜 보기
+              AI 메모 크레딧 부족 · 충전하기
             </Link>
           )}
         </div>

@@ -271,3 +271,36 @@ export function generateWordAiNote(memoId: string, wordIndex: number) {
     { method: 'POST' },
   )
 }
+
+export interface PaymentPrepareResponse {
+  paymentId: string
+  packId: 'nano' | 'starter' | 'plus' | 'standard' | 'pro' | 'power'
+  orderName: string
+  totalAmount: number
+  currency: 'CURRENCY_KRW'
+  storeId: string
+  channelKey: string
+  redirectUrl: string
+  payMethod: 'CARD'
+}
+
+export interface PaymentCompleteResponse {
+  success: boolean
+  packId: string
+  usage: UsageData
+  message?: string
+}
+
+export function preparePayment(packId: 'nano' | 'starter' | 'plus' | 'standard' | 'pro' | 'power') {
+  return apiFetch<PaymentPrepareResponse>('/payments/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ packId }),
+  })
+}
+
+export function completePayment(paymentId: string) {
+  return apiFetch<PaymentCompleteResponse>('/payments/complete', {
+    method: 'POST',
+    body: JSON.stringify({ paymentId }),
+  })
+}

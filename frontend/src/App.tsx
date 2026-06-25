@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout'
 import HomePage from './pages/HomePage'
 import MembershipPage from './pages/MembershipPage'
 import MemoPage from './pages/MemoPage'
+import PaymentCompletePage from './pages/PaymentCompletePage'
 
 const App = () => {
   return (
@@ -10,6 +11,7 @@ const App = () => {
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/membership" element={<MembershipPage />} />
+        <Route path="/payment/complete" element={<PaymentCompletePage />} />
         <Route path="/memo/:id" element={<MemoPage />} />
       </Route>
     </Routes>

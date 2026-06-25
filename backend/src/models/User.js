@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs'
 import mongoose from 'mongoose'
-import { getStartOfMonth } from '../utils/usage.js'
 
 const userSchema = new mongoose.Schema(
   {
@@ -15,13 +14,15 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6, select: false },
     plan: {
       type: String,
-      enum: ['free', 'basic', 'pro', 'team'],
-      default: 'free',
+      enum: ['credit'],
+      default: 'credit',
     },
     usedMinutes: { type: Number, default: 0, min: 0 },
     usedSeconds: { type: Number, default: 0, min: 0 },
     usedAiNotes: { type: Number, default: 0, min: 0 },
-    usagePeriodStart: { type: Date, default: () => getStartOfMonth() },
+    audioSecondsBalance: { type: Number, default: 60 * 60, min: 0 },
+    aiNotesBalance: { type: Number, default: 10, min: 0 },
+    usagePeriodStart: { type: Date, default: () => new Date() },
   },
   { timestamps: true },
 )

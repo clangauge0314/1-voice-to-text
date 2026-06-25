@@ -20,8 +20,8 @@ const highlights = [
   },
   {
     icon: Target,
-    title: '부담 없는 월 요금',
-    description: 'Basic 월 ₩4,900부터. 남은 분은 이월되지 않아 필요한 만큼만 쓰면 됩니다.',
+    title: '필요한 만큼만 충전',
+    description: '정기결제 없이 1회 충전으로 누적 사용합니다. 남은 크레딧은 소멸되지 않습니다.',
   },
 ]
 
@@ -65,11 +65,11 @@ const MembershipPromo = () => {
           <div className="max-w-xl">
             <p className="text-sm font-semibold text-white/50 dark:text-black/50">시작하기</p>
             <h2 className="mt-2 text-2xl font-bold md:text-3xl">
-              무료로 먼저 써 보고, 필요할 때 올리세요
+              무료 크레딧으로 시작하고, 필요할 때만 충전하세요
             </h2>
             <p className="mt-4 text-base leading-relaxed text-white/75 dark:text-black/75">
-              Free만으로도 월 60분 변환 + AI 메모 10회를 쓸 수 있어요.
-              꾸준히 쓰게 되면 Basic(₩4,900)으로 하루 8분씩 한 달 내내 복습할 수 있습니다.
+              가입 시 음성 60분 + AI 메모 10회 크레딧이 기본 제공됩니다.
+              부족해지면 Starter(음성 180분 · AI 30회, ₩4,900)부터 원하는 만큼 바로 충전해 계속 사용할 수 있습니다.
             </p>
           </div>
           <Link

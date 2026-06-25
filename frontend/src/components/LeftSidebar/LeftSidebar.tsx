@@ -21,25 +21,17 @@ import { useAuthModalStore } from '../../stores/authModalStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useMemoStore, type Memo } from '../../stores/memoStore'
 import { SIDEBAR_WIDTH, useSidebarStore } from '../../stores/sidebarStore'
-import { formatAiNotes, formatMinutes, type PlanType, useUsageStore } from '../../stores/usageStore'
-
-const planBadgeStyles: Record<PlanType, string> = {
-  free: 'bg-zinc-200 text-zinc-800 dark:bg-zinc-600 dark:text-white',
-  basic: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  pro: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-}
+import { formatAiNotes, formatMinutes, useUsageStore } from '../../stores/usageStore'
 
 const navItems = [
   { to: '/', label: '홈', icon: Home, end: true },
-  { to: '/membership', label: '멤버십', icon: Crown, end: false },
+  { to: '/membership', label: '크레딧 충전', icon: Crown, end: false },
 ]
 
 const SidebarFooter = () => {
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const openLogin = useAuthModalStore((state) => state.openLogin)
-  const plan = useUsageStore((state) => state.plan)
-  const planLabel = useUsageStore((state) => state.planLabel)
   const usedMinutes = useUsageStore((state) => state.usedMinutes)
   const remainingMinutes = useUsageStore((state) => state.remainingMinutes)
   const usedAiNotes = useUsageStore((state) => state.usedAiNotes)
@@ -53,7 +45,7 @@ const SidebarFooter = () => {
 
     return (
       <div className="space-y-2">
-        <div className="flex items-start gap-2 rounded-lg bg-black/[0.03] px-2 py-2 dark:bg-white/[0.06]">
+        <div className="flex items-start gap-2 rounded-lg bg-black/3 px-2 py-2 dark:bg-white/6">
           <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/20 bg-white dark:border-white/20 dark:bg-black">
             <User size={12} strokeWidth={2} />
           </span>
@@ -65,17 +57,12 @@ const SidebarFooter = () => {
               {user.email}
             </p>
             <p className="mt-1 text-[10px] font-medium leading-tight text-black/70 dark:text-white/75">
-              음성 {formatMinutes(usedMinutes)} 사용 · {formatMinutes(remainingMinutes)} 남음
+              음성 {formatMinutes(usedMinutes)} 사용 · {formatMinutes(remainingMinutes)} 보유
             </p>
             <p className="mt-0.5 text-[10px] leading-tight text-black/55 dark:text-white/60">
-              AI {formatAiNotes(usedAiNotes)} 사용 · {formatAiNotes(remainingAiNotes)} 남음
+              AI {formatAiNotes(usedAiNotes)} 사용 · {formatAiNotes(remainingAiNotes)} 보유
             </p>
           </div>
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none ${planBadgeStyles[plan]}`}
-          >
-            {planLabel}
-          </span>
         </div>
         <button
           type="button"
