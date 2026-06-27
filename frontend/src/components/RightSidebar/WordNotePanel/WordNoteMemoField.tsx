@@ -1,8 +1,8 @@
 import { Loader2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useWordNoteAi } from '../../hooks/useWordNoteAi'
-import { formatAiNotes, useUsageStore } from '../../stores/usageStore'
-import AiNoteSuggestionBanner from './AiNoteSuggestionBanner'
+import { useWordNoteAi } from '../../../hooks/useWordNoteAi'
+import { formatAiNotes, useUsageStore } from '../../../stores/usageStore'
+import AiNoteSuggestionBanner from '../AiNoteSuggestionBanner'
 import WordNoteAiButton from './WordNoteAiButton'
 
 interface WordNoteMemoFieldProps {

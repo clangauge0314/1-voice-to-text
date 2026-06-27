@@ -1,7 +1,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { forwardRef, useEffect, useImperativeHandle, type RefObject } from 'react'
-import type { MemoWord } from '../../stores/memoStore'
-import { formatSpeakerLabel } from '../../utils/transcriptToMemo'
+import type { MemoWord } from '../../../stores/memoStore'
+import { formatSpeakerLabel } from '../../../utils/transcriptToMemo'
+import type { WordNoteEditorRenderProps } from './types'
 
 export const VIRTUAL_SCROLL_THRESHOLD = 200
 const COLLAPSED_ROW_HEIGHT = 56
@@ -19,16 +20,7 @@ interface VirtualWordNoteListProps {
   openIndices: Set<number>
   activeWordIndex: number
   selectedIndexSet: Set<number>
-  renderEditor: (props: {
-    word: MemoWord
-    index: number
-    speakerLabel: string
-    isOpen: boolean
-    isHighlighted: boolean
-    isActive: boolean
-    onToggle: () => void
-    editorRef: (element: HTMLElement | null) => void
-  }) => React.ReactNode
+  renderEditor: (props: WordNoteEditorRenderProps) => React.ReactNode
   onToggleWord: (index: number) => void
   itemRefs: RefObject<Map<number, HTMLElement>>
 }

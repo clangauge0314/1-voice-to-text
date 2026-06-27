@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { useRightSidebarStore } from '../../stores/rightSidebarStore'
-import WordNotePanel from './WordNotePanel'
+import WordNotePanel from './WordNotePanel/WordNotePanel'
 
 interface SidebarPanelProps {
   resizable: boolean
