@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
+import adminRoutes from './admin/index.js'
 import authRoutes from './auth.js'
 import memoRoutes from './memos.js'
 import paymentRoutes from './payments.js'
@@ -17,6 +18,7 @@ router.get('/health', (_req, res) => {
 })
 
 router.use('/auth', authRoutes)
+router.use('/admin', adminRoutes)
 router.use('/usage', usageRoutes)
 router.use('/uploads', uploadRoutes)
 router.use('/transcripts', transcriptRoutes)

@@ -53,7 +53,7 @@
 ## 10. 챕터 로드맵 (초안)
 - Ch00: Setup
 - Ch01: Auth
-- Ch02: Layout
+- Ch4-1: Layout & Colors → [docs/4-1/README.md](./4-1/README.md)
 - Ch03: Upload
 - Ch04: Transcription
 - Ch05~07: Transcript Editor

@@ -17,6 +17,11 @@ export async function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
+
+    if (decoded.type === 'admin') {
+      return res.status(401).json({ error: '관리자 토큰으로는 일반 서비스에 접근할 수 없습니다.' })
+    }
+
     const user = await User.findById(decoded.userId).select('-password')
 
     if (!user) {
