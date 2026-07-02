@@ -1,0 +1,54 @@
+---
+description: API 응답 형식, 에러 처리, 인증/관리자 보안 규칙
+globs: backend/src/{routes,middleware,utils}/**/*.js
+alwaysApply: false
+---
+
+# Backend API, Error, Auth
+
+## 응답 형식
+- 성공 응답은 목적 중심 JSON 반환
+- 실패 응답은 항상 `{ error: '한국어 메시지' }`
+- 상태코드는 의미에 맞게 사용 (`400/401/403/404/500`)
+
+**예외**
+- 글로벌 404: `{ error: 'Not Found' }` (영문)
+- 글로벌 500: `{ error: 'Internal Server Error' }` (영문)
+- IP 차단: `{ error, clientIp }`
+- payments webhook: `{ ok: true }` — `error` 키 없음
+- transcript 비403 실패: HTTP **201** + body `{ status: 'failed', error }` (에러 JSON 아님)
+
+## HTTP 코드
+
+| Code | 용도 |
+|------|------|
+| 400 | validation, multer, 결제 금액 불일치 |
+| 401 | JWT 없음/무효, 로그인 실패 |
+| 403 | 관리자→유저 auth, IP 차단, 크레딧 부족 |
+| 404 | 리소스 없음 |
+| 409 | 이메일 중복, 전사 진행 중 |
+| 502 | AI 노트 invalid |
+| 503 | Gemini/PortOne 설정 누락 |
+
+## 에러 처리
+- 라우트 핸들러는 `try/catch`
+- 도메인 에러: `Object.assign(new Error(msg), { statusCode: N })` → catch에서 `err.statusCode ?? 500`
+- 알 수 없는 에러는 서버 로그 후 500 응답
+- 사용자 노출 메시지는 한국어로 일관성 유지
+
+## 인증 모델
+- User/Admin 컬렉션 분리 유지
+- JWT payload 구분 유지
+  - 유저: `{ userId }`
+  - 관리자: `{ adminId, type: 'admin' }`
+- 관리자 이메일로 일반 auth 접근 시 403 차단
+
+## 관리자 보호
+- 관리자 라우트는 `routes/admin/` 하위 배치
+- IP 검사(`ipWhitelistMiddleware`) 먼저 적용
+- 인증 검사(`adminAuthMiddleware`)를 통계/민감 API에 적용
+
+## 금지
+- `error`, `message` 혼용으로 응답 스키마 깨기
+- 관리자 API를 일반 auth 미들웨어로만 보호
+- 인증 실패를 200 응답으로 처리

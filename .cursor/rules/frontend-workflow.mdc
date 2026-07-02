@@ -1,0 +1,97 @@
+---
+description: 프론트엔드 작업 절차, 네이밍, TypeScript·React 공통 원칙
+globs: frontend/src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend Workflow
+
+## 스택 (중요)
+- **Vite + React 19 + TypeScript + React Router + Zustand + Tailwind v4**
+- Next.js / App Router / RSC / Shadcn / Radix / nuqs **사용하지 않음**
+- 새 코드는 위 스택과 기존 패턴만 따른다
+
+## 작업 절차
+1. **요청 분석** — 변경 범위(페이지/컴포넌트/store/API), 기존 유사 코드 위치 확인
+2. **계획** — 재사용 가능한 기존 훅·store·컴포넌트 우선, 새 파일은 최소화
+3. **구현** — 작은 diff, early return, 로딩/에러/빈 상태까지 처리
+
+## TypeScript
+- `interface`로 props·도메인 타입 정의 (`type`은 union/utility에만)
+- `enum` 대신 `const` 객체 + `as const` + union type
+- `React.FC` 금지 — `(props: XxxProps) => JSX.Element` 또는 암시적 반환
+- 공유 union은 단일 파일 export (`CreditPackId` → `lib/api.ts`)
+
+## 네이밍
+- boolean: `isLoading`, `hasError`, `canSubmit`
+- 이벤트 핸들러: `handleClick`, `handleSubmit`, `handleDelete`
+- 훅: `use` 접두사 (`useMemoInit`, `useChartTheme`)
+- 파일명 = 컴포넌트명 (PascalCase)
+
+## 컴포넌트 구조 (권장 순서)
+1. imports (외부 → router → lib/hooks/stores → components)
+2. types (`interface XxxProps`)
+3. 상수 / 헬퍼 (컴포넌트 밖)
+4. 컴포넌트 본문: hooks → derived state → handlers → early return → JSX
+5. `export default`
+
+## React 패턴
+- `useCallback` / `useMemo`는 의존성·참조 안정성이 필요할 때만
+- effect cleanup 필수 (구독, 타이머, abort)
+- 페이지 데이터는 store action 또는 custom hook으로 캡슐화
+- 라우트 가드는 `AdminProtectedRoute`처럼 `<Outlet />` 래퍼로 분리
+
+## 접근성·UX
+- 인터랙티브 요소: `type="button"` 명시 (폼 submit 제외)
+- 아이콘-only 버튼: `aria-label` 한국어
+- 로딩: `Loader2` + `animate-spin`, 버튼은 `disabled` + 상태 텍스트
+- 성공/실패 피드백: `sonner` toast 또는 인라인 메시지
+
+## HomePage 업로드 플로우 (`pages/HomePage.tsx`)
+
+- 파일 검증: `audio/*`, `video/*` 또는 확장자 화이트리스트
+- 비로그인 → `toast.error` + `authModalStore.openLogin()`
+- `uploadAudio` (XHR progress) → `startTranscription` → `loadMemos` → `navigate(/memo/:id)`
+- `ProcessStep`: `idle | uploading | transcribing | creating-memo | complete`
+- `PROGRESS` 상수: 업로드 33% → 전사 66% → 메모 90% → 완료 100%
+- `getStepLabel`, `StageSteps` — 단계별 한국어 UI
+- `isProcessing` 중 드래그·클릭 비활성
+- 전사 실패 (`status !== 'completed'`): toast + description 「파일은 Cloudinary에 업로드되었습니다.」
+- 성공: `transcript.usage` → `usageStore.setUsage`, `transcript.memoId` 우선 navigate
+
+## 금지
+- 요청 없는 리팩터·파일 이동·의존성 추가
+- `@/` alias, `.tsx` import 확장자, 배럴 `index.ts`
+- 서버 데이터 Zustand persist
+- Next.js 전용 API·컴포넌트 패턴 도입
+
+## 예시
+
+```tsx
+// Good — selector 구독 + handle* + early return
+const MemoPage = () => {
+  const user = useAuthStore((state) => state.user)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await saveMemoContent(id, content)
+      toast.success('저장되었습니다.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '저장에 실패했습니다.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (!user) return <Navigate to="/" replace />
+  // ...
+}
+
+// Bad — 전체 store 구독, FC, 영문 에러
+const MemoPage: React.FC = () => {
+  const store = useMemoStore()
+  // ...
+}
+```

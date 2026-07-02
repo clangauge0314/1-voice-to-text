@@ -1,0 +1,33 @@
+---
+description: 백엔드 작업 절차, 범위 통제, 검증 기준
+globs: backend/{src,scripts}/**/*.js
+alwaysApply: false
+---
+
+# Backend Workflow
+
+## 스택
+- Node.js ESM + Express 4 + Mongoose
+- `.js` 파일 기준 (`type: module`)
+- 새 기능은 기존 디렉터리 구조(`config`, `routes`, `models`, `middleware`, `utils`)를 따른다
+
+## 작업 방식
+- 요청 범위를 벗어난 리팩터링·파일 이동·의존성 추가 금지
+- 기존 패턴 우선 재사용 (`connectDB`, 라우터 분리, middleware 조합)
+- 최소 diff 원칙 유지
+
+## 구현 순서
+1. 환경·앱 골격 (`config/env.js`, `config/db.js`, `app.js`, `index.js`)
+2. 라우터 뼈대 (`routes/index.js` + 하위 라우터 연결)
+3. 모델·유틸·미들웨어 확장
+4. 마지막에 엔드포인트 검증
+
+## 검증
+- `GET /api/health` 정상 응답 확인
+- 포트 충돌(`EADDRINUSE`) 처리 확인
+- 에러 응답 형식 확인 (`{ error: '...' }`)
+
+## 금지
+- 프론트 코드 수정
+- 민감 정보 하드코딩
+- 관리자/결제 로직에 임의 스키마 변경

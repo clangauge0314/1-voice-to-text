@@ -1,0 +1,70 @@
+---
+description: Tailwind, 다크모드, 접근성, 관리자 대시보드 UI 규칙
+globs: frontend/src/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# Frontend UI (Tailwind)
+
+## 스타일 원칙
+- **Tailwind 우선** — 새 `.css` 파일은 거의 추가하지 않음
+- inline style: 차트 크기, virtual list 위치, 동적 좌표 등 Tailwind로 표현 불가한 경우만
+- UI 텍스트·`aria-label`·toast·에러: **한국어**
+- 아이콘: `lucide-react` (`Loader2`, `Check`, `Trash2` …)
+- 토스트: `sonner` (`toast.success`, `toast.error`)
+
+## 다크모드 (`themeStore`)
+- `applyTheme()` → `document.documentElement.classList`에 `dark` 토글
+- light/dark **항상 쌍으로** 작성:
+
+```
+bg-white dark:bg-black
+text-black dark:text-white
+border-black/10 dark:border-white/10
+text-black/60 dark:text-white/60
+bg-black/5 dark:bg-white/5
+```
+
+## 인터랙션
+- hover 반전 (ThemeToggle·Navbar·버튼 공통):
+  `hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black`
+- transition: `transition-colors` (필요 시 `duration-200`)
+- disabled: `disabled:opacity-50 disabled:pointer-events-none`
+- focus: `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 dark:focus-visible:ring-white/20`
+
+## 레이아웃·반응형
+- 콘텐츠 max width: `max-w-7xl mx-auto px-4 sm:px-6`
+- 모바일 분기: `useIsMobile()` (`hooks/useMediaQuery.ts`)
+- admin 테이블: 데스크톱 `<table>`, 모바일 카드 리스트 (기존 `RecentUsersTable` 패턴)
+
+## 버튼·폼
+```tsx
+<button
+  type="button"
+  onClick={handleSubmit}
+  disabled={isSubmitting}
+  aria-label="테마 전환"
+  className="... border ... transition-colors hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black disabled:opacity-50"
+>
+  {isSubmitting ? <Loader2 className="animate-spin" size={16} /> : '저장'}
+</button>
+```
+
+- submit 버튼만 `type="submit"`
+- destructive action: `Trash2` + 확인 UI 또는 명확한 라벨
+
+## 관리자 대시보드
+- 위치: `components/admin/dashboard/`
+- KPI: `StatCard` + `DashboardPanel`
+- 차트: `recharts` — 색상 `useChartTheme()`, 레이아웃 `useChartLayout()`
+- 숫자/날짜 포맷: `formatters.ts` (`formatCurrency`, `formatDate` …)
+- 차트·테이블은 `ResponsiveContainer` / 모바일 카드 대체 유지
+
+## 애니메이션
+- 페이지·패널: `framer-motion` (`motion.div`, `AnimatePresence`) — 기존 MemoPage/HomePage 수준 유지
+- 과도한 motion 추가 금지 (접근성·성능)
+
+## 금지
+- Shadcn/Radix 컴포넌트 도입 (요청 없이)
+- `dark:` 없이 light 전용 색만 사용
+- 인라인 `style={{ color: '#fff' }}` 로 테마 색 하드코딩

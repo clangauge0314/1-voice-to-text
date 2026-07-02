@@ -1,0 +1,116 @@
+---
+description: Mongoose 모델, 미들웨어, 도메인 utils 책임
+globs: backend/src/{models,middleware,utils,constants,config}/**/*
+alwaysApply: false
+---
+
+# Backend Models & Domain
+
+## Models
+
+### User (`models/User.js`)
+- `name`, `email` (unique, lowercase), `password` (bcrypt, `select: false`, min 6)
+- `plan`: `'credit'` only
+- `usedMinutes`, `usedSeconds`, `usedAiNotes`
+- `audioSecondsBalance` default 3600, `aiNotesBalance` default 10
+- `usagePeriodStart`, timestamps
+- `comparePassword(candidate)`
+
+### Admin (`models/Admin.js`)
+- User와 동일 password 패턴, 별도 collection
+- register/login 시 Admin 이메일이면 일반 auth 403
+
+### Upload (`models/Upload.js`)
+- `user` (ref User), `originalName`, `cloudinaryUrl`, `publicId`
+- `duration`, `format`, `bytes`, `status`: `uploaded | failed`
+
+### Transcript (`models/Transcript.js`)
+- `upload` (ref, **unique**), `user`, `status`, `content` (Mixed), `error`
+- `billedSeconds` — 차감 완료 시 기록
+
+### Memo (`models/Memo.js`)
+- `user`, `upload` (**unique**), `transcript`, `title`, `preview`
+- `words`, `segments` (Mixed arrays, nullable)
+
+### Payment (`models/Payment.js`)
+- `user`, `paymentId` (unique), `packId`, `creditAudioSeconds`, `creditAiNotes`
+- `orderName`, `amount`, `currency` default KRW
+- `status`: `pending | paid | failed | cancelled`
+- `paymentType`: `credit_pack`, `portoneStatus`, `paidAt`
+
+## Middleware
+
+| File | Export | 역할 |
+|------|--------|------|
+| `auth.js` | `authMiddleware` | Bearer/`?token=`, `{ userId }`, `req.user`, admin JWT 거부 |
+| `adminAuth.js` | `adminAuthMiddleware` | `{ adminId, type: 'admin' }`, `req.admin` |
+| `ipWhitelist.js` | `ipWhitelistMiddleware` | `ADMIN_ALLOWED_IPS`, `ADMIN_IP_CHECK=false` 시 skip |
+| `upload.js` | `uploadAudio` | multer memory 100MB, audio/video filter |
+
+## Utils 책임
+
+| File | 역할 |
+|------|------|
+| `serializers.js` | `toUploadResponse`, `toTranscriptResponse`, `toMemoResponse` |
+| `usage.js` | 잔액·소비·`assertAudioSeconds`, `assertAiNotes`, `toUsageResponse`, `ensureCurrentPeriod` |
+| `audioDuration.js` | `resolveBillableSeconds` — upload/content 기반 청구 초 |
+| `memo.js` | `ensureMemoForTranscript`, `backfillMemosForUser`, `deleteMemoResources` |
+| `memoWords.js` | word normalize/extract/preview, `MAX_WORD_NOTE_LENGTH=2000` |
+| `memoSegments.js` | segment normalize/extract/preview |
+| `memoContext.js` | `buildWordNoteAiContext` — Gemini 프롬프트 맥락 |
+| `gemini.js` | `generateWordNote`, retry on short/MAX_TOKENS |
+| `whisperx.js` | `transcribeAudio` — `POST {WHISPERX_API_URL}/transcribe?output_format=json` |
+| `downloadFile.js` | Cloudinary URL → buffer + MIME |
+| `cloudinaryUpload.js` | `uploadBuffer` (resource_type video), `deleteAsset` |
+| `portone.js` | V2 API, order ID, verify, redirect URL |
+| `adminStats.js` | 7일 트렌드, KPI, pack 분포, recent users/payments |
+| `clientIp.js` | `x-forwarded-for`, `::ffff:` 정규화 |
+
+## Constants
+
+`constants/creditPacks.js` — `CREDIT_PACKS`, `CREDIT_PACK_IDS`, `getCreditPack`, `normalizeCreditPackId`
+
+| packId | audioSeconds | aiNotes | price KRW |
+|--------|-------------|---------|-----------|
+| nano | 5400 | 15 | 2900 |
+| starter | 10800 | 30 | 4900 |
+| plus | 18000 | 55 | 7900 |
+| standard | 28800 | 90 | 11900 |
+| pro | 45600 | 145 | 16900 |
+| power | 72000 | 250 | 23900 |
+
+## Config
+
+| File | 역할 |
+|------|------|
+| `env.js` | `dotenv.config({ path: backend/.env })` |
+| `db.js` | `connectDB()` — `MONGODB_URI` 필수 |
+| `cloudinary.js` | `CLOUDINARY_URL` 또는 개별 키 3종 |
+
+### Windows MongoDB SRV (선택)
+
+Node v24.13.0+ Windows에서 `mongodb+srv` → `querySrv ECONNREFUSED` 시:
+
+```js
+if (uri.startsWith('mongodb+srv://')) {
+  dns.setServers(['8.8.8.8', '1.1.1.1'])
+}
+```
+
+## Transcript → Memo 생성 (`ensureMemoForTranscript`)
+
+1. transcript `completed` + upload 소유 확인
+2. 기존 memo 있으면 반환
+3. `extractMemoWords` / `extractMemoSegments` → title·preview 생성
+4. Memo 문서 create
+
+## 크레딧 차감 (`transcripts` POST)
+
+1. `resolveBillableSeconds(upload, content)`
+2. `assertAudioSeconds(user, seconds)` — 부족 시 403
+3. 전사 성공 후 consume + `billedSeconds` 기록
+4. 응답에 `toUsageResponse(billedUser)`
+
+## Scripts
+
+`scripts/create-admin.js` — `--email`, `--password`, `--name` CLI, 기존 이메일이면 업데이트

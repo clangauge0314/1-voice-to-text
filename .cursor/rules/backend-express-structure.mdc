@@ -1,0 +1,36 @@
+---
+description: Express 앱 구조, 라우트 등록, 미들웨어 배치 규칙
+globs: backend/src/**/*.js
+alwaysApply: false
+---
+
+# Backend Express Structure
+
+## 파일 책임
+- `src/config/env.js`: `dotenv.config()` — 완성본은 `path.join`으로 `backend/.env` 명시 경로 지정 가능
+- `src/config/db.js`: `connectDB()` — `MONGODB_URI` 필수, Windows `mongodb+srv` SRV 이슈 시 `dns.setServers` 우회 가능
+- `src/app.js`: express app 인스턴스와 전역 middleware/라우터 등록
+- `src/index.js`: 서버 부팅(환경 로드, DB 연결, listen)
+
+## 라우팅
+- 엔트리 라우터는 `src/routes/index.js`
+- 기능 라우터는 `src/routes/*.js` 또는 `src/routes/<domain>/`
+- API prefix는 `app.use('/api', routes)`에서 단일 관리
+
+## 미들웨어 순서
+1. `app.set('trust proxy', 1)`
+2. `cors`
+3. `express.json`, `express.urlencoded`
+4. `app.use('/api', routes)`
+5. 404 핸들러
+6. 에러 핸들러
+
+## 서버 시작 규칙
+- `PORT = process.env.PORT ?? 1001`
+- DB 연결 성공 후 listen
+- `EADDRINUSE` 메시지 분기 처리
+
+## 코딩 규칙
+- ESM `import/export`만 사용
+- 라우터/미들웨어는 작은 단위로 분리
+- 요청 처리 함수는 `async` + `try/catch` 기본

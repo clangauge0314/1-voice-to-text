@@ -1,0 +1,93 @@
+---
+description: Zustand, API, 타입, 로딩/에러 처리 규칙
+globs: frontend/src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend State & API
+
+## Zustand
+```tsx
+// Good — 필드별 selector
+const user = useAuthStore((state) => state.user)
+const toggleTheme = useThemeStore((state) => state.toggleTheme)
+
+// Bad — 전체 구독 (불필요 리렌더)
+const store = useAuthStore()
+```
+
+- persist: `authStore`, `themeStore`, `sidebarStore` 등 UI/세션만
+- **persist 금지**: memo 목록, usage, transcript, admin stats 등 서버 데이터
+- store 밖에서 action 호출: `useXxxStore.getState().action()`
+- init 훅 패턴: `useAuthInit`, `useAdminAuthInit`, `useMemoInit`, `useUsageInit`
+
+## usageStore (`stores/usageStore.ts`)
+
+- `UsageData` — `usedMinutes`, `totalMinutes`, `remainingMinutes`, `usagePercent`, AI 메모 잔량 등
+- `GUEST_USAGE` — 비로그인 기본값 (UI용)
+- `setUsage(data)` — 서버 `usage` 응답으로 전체 교체 (전사 성공·결제 후)
+- `resetToGuest()` — 로그아웃·`useUsageInit` 실패 시
+- getter: `getTotalMinutes`, `getRemainingMinutes`, `getUsagePercent` …
+- 포맷 헬퍼: `formatMinutes`, `formatDurationSeconds`, `formatAiNotes`
+- **persist 금지** — `useUsageInit`이 로그인 시 `GET /api/usage/me`로 로드
+
+## authStore + API 토큰
+
+- `authStore`: `token`, `user`, `login`, `logout` (token persist)
+- `apiFetch`: `useAuthStore.getState().token` → `Authorization: Bearer`
+- `uploadAudio`: XHR에서 동일하게 토큰 헤더 설정
+
+## API 레이어
+| 영역 | 파일 | fetch 헬퍼 |
+|------|------|------------|
+| 사용자 | `lib/api.ts` | `apiFetch<T>` |
+| 관리자 | `lib/adminApi.ts` | `adminApiFetch<T>` |
+
+- base URL·토큰·JSON 헤더는 각 fetch 헬퍼 내부에서 처리
+- API 에러 메시지는 **한국어**로 throw (`throw new Error('로그인이 필요합니다.')`)
+- 파일 업로드 progress: `XMLHttpRequest` + `onprogress` (기존 `uploadAudio` 패턴)
+- 전사 요청: `startTranscription(uploadId)` → `POST /api/transcripts` (`TranscriptResponse` + `usage`)
+- 전사 성공 후 `useUsageStore.getState().setUsage(transcript.usage)` 로 크레딧 바 갱신
+- PortOne 등 외부 SDK 호출도 lib에 모아 두고 페이지에서 직접 fetch 하지 않음
+
+## 타입
+- 공유 union/enum 대체: `lib/api.ts` 단일 export
+  - 예: `CreditPackId`, `CreditPack`, 결제 관련 타입
+- admin 전용 응답 타입: `lib/adminApi.ts`
+- 컴포넌트 props: 파일 내부 `interface XxxProps`
+- store state/action interface는 store 파일 상단
+
+## 비동기·에러 처리
+```tsx
+// UI catch 표준
+catch (err) {
+  const message = err instanceof Error ? err.message : '요청에 실패했습니다.'
+  toast.error(message)
+}
+
+// init 훅 — 실패 시 store 정리
+fetchMe()
+  .then(({ user }) => login(user, token))
+  .catch(() => logout())
+```
+
+- 로딩 UI: `useState` + `isLoading` / 페이지 레벨 `'loading' | 'ready' | 'not-found'`
+- 낙관적 업데이트는 UX상 명확할 때만; 실패 시 rollback
+- admin API 403(IP 차단): `AdminLayout` → `AdminBlockedPage` 흐름 유지
+
+## store action 가이드
+- API 호출 → 성공 시 state 갱신 → 실패 시 throw (UI에서 catch)
+- memo CRUD: `memoStore` (`ensureMemoLoaded`, `saveMemoContent`, `deleteMemo` …)
+- `saveMemoContent`: memo ID별 직렬 큐로 동시 저장 방지
+- `generateWordAiNote` 성공 시 `usageStore.setUsage`
+- playback/selection: `memoPlaybackStore`, `wordSelectionStore` — UI state만
+
+## adminAuthStore
+
+- User auth와 **완전 분리** — `adminApiFetch`는 `adminAuthStore` 토큰 사용
+- `AdminLayout` IP 차단 시 `AdminBlockedPage` (라우터 밖 렌더)
+
+## 금지
+- 페이지/컴포넌트에서 raw `fetch('/api/...')` 직접 호출
+- 서버 응답 타입을 컴포넌트마다 중복 정의
+- 에러를 `console.log`만 하고 사용자에게 미표시

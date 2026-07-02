@@ -1,0 +1,127 @@
+---
+description: 백엔드 API 엔드포인트·요청·응답 계약 전체
+globs: backend/src/routes/**/*.js
+alwaysApply: false
+---
+
+# Backend API Routes
+
+모든 경로는 `/api` prefix. 실패 응답 기본: `{ error: '한국어' }`.
+
+## Health — `routes/index.js`
+
+| Method | Path | Auth | Response |
+|--------|------|------|----------|
+| GET | `/health` | 없음 | `{ status: 'ok', db: 'connected' \| 'disconnected' }` |
+
+## Auth — `routes/auth.js` → `/api/auth`
+
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/register` | 없음 | `{ name, email, password }` | 201 `{ token, user: { id, name, email } }` |
+| POST | `/login` | 없음 | `{ email, password }` | 200 `{ token, user }` |
+| GET | `/me` | `authMiddleware` | — | `{ user: { id, name, email } }` |
+
+- JWT `{ userId }`, `expiresIn: '7d'`
+- 관리자 이메일 register/login → 403
+- 이메일 중복 → 409
+
+## Uploads — `routes/uploads.js` → `/api/uploads`
+
+| Method | Path | Auth | Request | Response |
+|--------|------|------|---------|----------|
+| POST | `/audio` | `authMiddleware` + multer `file` | multipart | 201 `toUploadResponse` |
+| GET | `/:id/audio` | `authMiddleware` | — | 302 → Cloudinary URL |
+| GET | `/:id` | `authMiddleware` | — | `toUploadResponse` |
+
+**UploadResponse**: `{ id, url, publicId, originalName, duration, format, bytes, status, createdAt }`
+
+- multer: memory, 100MB, audio/video MIME·확장자
+- 소유권: `upload.user === req.user._id`
+
+## Transcripts — `routes/transcripts.js` → `/api/transcripts`
+
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/` | `authMiddleware` | `{ uploadId }` | 아래 참고 |
+| GET | `/:id` | `authMiddleware` | — | `toTranscriptResponse` |
+
+**POST 동작**
+- 이미 `completed` → 200 + transcript + `memoId` + `usage`
+- `processing` → 409
+- 신규: status `processing` → WhisperX → `completed` 또는 `failed`
+- 크레딧 부족 → 403
+- 비403 전사 실패 → **201** + `{ ...transcript, status: 'failed', error }` (에러 JSON 아님)
+
+**TranscriptResponse**: `{ id, uploadId, status, content, error, createdAt, updatedAt }`  
+성공 POST 추가: `memoId?`, `usage?`
+
+`status`: `pending | processing | completed | failed`
+
+## Memos — `routes/memos.js` → `/api/memos`
+
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| GET | `/` | `authMiddleware` | — | `{ memos: MemoResponse[] }` (backfill 후) |
+| GET | `/:id` | `authMiddleware` | — | `toMemoResponse` (words/segments 포함) |
+| PATCH | `/:id` | `authMiddleware` | `{ title?, words?, segments? }` | `toMemoResponse` |
+| POST | `/:id/words/:wordIndex/ai-note` | `authMiddleware` | — | `{ note, memo, usage }` |
+| DELETE | `/:id` | `authMiddleware` | — | `{ success: true }` |
+
+**MemoResponse**: `{ id, title, preview, uploadId, transcriptId, audioUrl, duration, language, speakers, segmentCount, wordCount, createdAt, updatedAt, words?, segments? }`
+
+## Usage — `routes/usage.js` → `/api/usage`
+
+| Method | Path | Auth | Response |
+|--------|------|------|----------|
+| GET | `/me` | `authMiddleware` | `toUsageResponse(user)` |
+
+**UsageResponse**: `{ plan: 'credit', usedMinutes, totalMinutes, remainingMinutes, usedSeconds, totalSeconds, remainingSeconds, usagePercent, usedAiNotes, totalAiNotes, remainingAiNotes, aiUsagePercent, usagePeriodStart, audioSecondsBalance, aiNotesBalance }`
+
+## Payments — `routes/payments.js` → `/api/payments`
+
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/webhook/portone` | 없음 | PortOne webhook | `{ ok: true }` 등 |
+| POST | `/prepare` | `authMiddleware` | `{ packId }` | PortOne 결제 파라미터 |
+| POST | `/complete` | `authMiddleware` | `{ paymentId }` | `{ success, packId, usage, message? }` |
+
+**prepare 응답**: `{ paymentId, packId, orderName, totalAmount, currency: 'CURRENCY_KRW', storeId, channelKey, redirectUrl, payMethod: 'CARD' }`
+
+**packId**: `nano | starter | plus | standard | pro | power`
+
+## Admin — `routes/admin/` → `/api/admin`
+
+전체 `ipWhitelistMiddleware` 적용.
+
+### `routes/admin/index.js`
+
+| Method | Path | Auth | Response |
+|--------|------|------|----------|
+| GET | `/access-check` | IP만 | `{ allowed: true, clientIp }` |
+| GET | `/stats` | IP + `adminAuthMiddleware` | `buildAdminStats()` |
+
+IP 차단: `{ error: '허용되지 않은 IP입니다.', clientIp }` (403)
+
+### `routes/admin/auth.js` → `/api/admin/auth`
+
+| Method | Path | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/login` | IP만 | `{ email, password }` | `{ token, admin: { id, name, email } }` |
+| GET | `/me` | IP + `adminAuthMiddleware` | — | `{ admin }` |
+
+JWT `{ adminId, type: 'admin' }`
+
+## HTTP 코드 관례
+
+| Code | 용도 |
+|------|------|
+| 400 | validation, multer, 결제 금액 불일치 |
+| 401 | JWT 없음/무효 |
+| 403 | 관리자→유저 auth, IP 차단, 크레딧 부족 |
+| 404 | 리소스 없음 |
+| 409 | 이메일 중복, 전사 진행 중 |
+| 502 | AI 노트 invalid |
+| 503 | Gemini/PortOne 설정 누락 |
+
+도메인 throw: `Object.assign(new Error(msg), { statusCode: N })`

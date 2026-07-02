@@ -1,0 +1,138 @@
+---
+description: voice-to-text 전체 아키텍처, 데이터 모델, 핵심 플로우, 재구현 순서
+alwaysApply: true
+---
+
+# Project Architecture
+
+음성·영상 업로드 → WhisperX 전사 → 메모 편집·AI 단어 노트·크레딧 결제 SPA.
+
+## 포트·프록시
+
+| 서비스 | 포트 | 비고 |
+|--------|------|------|
+| Frontend (Vite) | 1000 | `vite.config.ts` — `/api` → `http://localhost:1001` |
+| Backend (Express) | 1001 | `PORT` env, default 1001 |
+
+프론트 API 호출은 **항상** `/api` 상대경로 (`lib/api.ts`, `lib/adminApi.ts`). 백엔드 절대 URL 직접 호출 금지.
+
+## 데이터 모델 (MongoDB)
+
+```
+User ──1:N── Upload ──1:1── Transcript
+  │              │
+  │              └──1:1── Memo (transcript ref)
+  └──1:N── Payment
+
+Admin (독립 컬렉션, users와 이메일 격리)
+```
+
+| Model | Collection | 핵심 관계 |
+|-------|------------|-----------|
+| User | users | 크레딧 잔액·사용량 보유 |
+| Admin | admins | 관리자 전용, 일반 auth 차단 |
+| Upload | uploads | user, Cloudinary URL, duration |
+| Transcript | transcripts | upload unique, WhisperX content |
+| Memo | memos | upload unique, words/segments |
+| Payment | payments | PortOne paymentId unique |
+
+상세 스키마: `backend-models-domain.mdc`
+
+## 인증 (이중 체계)
+
+| | User | Admin |
+|---|------|-------|
+| 컬렉션 | users | admins |
+| JWT payload | `{ userId }` | `{ adminId, type: 'admin' }` |
+| 프론트 store | `authStore` (persist) | `adminAuthStore` (persist) |
+| API layer | `lib/api.ts` | `lib/adminApi.ts` |
+| 미들웨어 | `authMiddleware` | `adminAuthMiddleware` + `ipWhitelistMiddleware` |
+| 만료 | 7d | 7d |
+
+- 토큰 전달: `Authorization: Bearer` 또는 `?token=` (오디오 URL 등)
+- 관리자 이메일로 `/api/auth/register|login` → **403**
+- 유저 JWT로 admin API → **401**
+
+## 핵심 비즈니스 플로우
+
+### 1. 홈 업로드 → 전사 → 메모
+
+1. `POST /api/uploads/audio` — multer → Cloudinary → Upload 문서
+2. `POST /api/transcripts` `{ uploadId }` — 크레딧 선검증 → WhisperX → 차감 → Transcript
+3. `ensureMemoForTranscript` — Memo 자동 생성 (title, preview, words, segments)
+4. 응답: `TranscriptResponse` + `memoId` + `usage`
+5. 프론트 `HomePage`: upload → transcribe → loadMemos → `/memo/:memoId`
+
+### 2. 메모 편집
+
+- `GET /api/memos/:id` — words/segments 포함
+- `PATCH /api/memos/:id` — title, words, segments
+- `POST /api/memos/:id/words/:wordIndex/ai-note` — Gemini, AI 크레딧 차감
+- 프론트: `MemoPage` + `MemoTranscriptEditor` + `WordNotePanel` + `MemoWaveformPlayer`
+
+### 3. 크레딧·결제
+
+- 유저 기본: 3600초(60분) 음성, 10회 AI 메모 (`User` 기본값)
+- 전사 시 `audioSecondsBalance` 차감 (`utils/usage.js`, `utils/audioDuration.js`)
+- AI 노트 시 `aiNotesBalance` 차감
+- `POST /api/payments/prepare` → PortOne V2 → `POST /api/payments/complete`
+- 패키지 ID: `nano|starter|plus|standard|pro|power` — `constants/creditPacks.js` 단일 소스
+
+### 4. 관리자
+
+1. `GET /api/admin/access-check` — IP 화이트리스트
+2. `POST /api/admin/auth/login` — admin JWT
+3. `GET /api/admin/stats` — KPI·차트·최근 유저/결제
+
+## 재구현 권장 순서
+
+### Backend
+1. `config/env.js`, `app.js`, `index.js`, `GET /api/health`
+2. `config/db.js`, `connectDB`, health `db` 필드
+3. Auth — `User`, `authMiddleware`, `/api/auth`
+4. Upload — Cloudinary, multer, `/api/uploads`
+5. Usage — `utils/usage.js`, `/api/usage/me`
+6. Transcript — WhisperX, `/api/transcripts`, 크레딧 선검증·차감
+7. Memo — 모델·utils·`/api/memos`, transcript 응답 `memoId`
+8. Payments — PortOne, `/api/payments`
+9. Admin — `Admin`, IP whitelist, `/api/admin`
+
+### Frontend
+1. Vite + Router + Tailwind + `MainLayout` 골격
+2. `authStore`, `api.ts`, `AuthModal`, `useAuthInit`
+3. `usageStore`, `useUsageInit`, 홈 크레딧 UI
+4. `HomePage` 업로드·전사 플로우
+5. `memoStore`, `useMemoInit`, `LeftSidebar` 목록
+6. `MemoPage` + 웨이브폼 + 전사 편집기 + WordNote
+7. `MembershipPage` + PortOne 결제
+8. Admin 레이아웃·대시보드
+
+## 외부 서비스
+
+| 서비스 | env | 용도 |
+|--------|-----|------|
+| MongoDB Atlas | `MONGODB_URI` | DB |
+| Cloudinary | `CLOUDINARY_*` | 미디어 |
+| WhisperX API | `WHISPERX_API_URL` | 전사 (별도 서버, URL 변경 시 재시작) |
+| Google Gemini | `GOOGLE_AI_API_KEY`, `GEMINI_MODEL` | AI 단어 노트 |
+| PortOne V2 | `PORTONE_*`, `FRONTEND_URL` | 결제 |
+
+## Agent 제약
+
+1. 포트 1000·1001 — 임의로 테스트 서버 띄우지 말 것
+2. 최소 diff — 범위 밖 리팩터·의존성·파일 이동 금지
+3. 백엔드 작업 시 프론트 수정은 요청 있을 때만 (반대도 동일)
+4. `.env`·API 키 커밋 금지
+5. Next.js / Shadcn / `@/` alias 도입 금지
+
+## 상세 규칙 참조
+
+| 영역 | 파일 |
+|------|------|
+| 백엔드 API 전체 | `backend-api-routes.mdc` |
+| 백엔드 모델·도메인 | `backend-models-domain.mdc` |
+| 백엔드 Express 구조 | `backend-express-structure.mdc` |
+| 백엔드 에러·인증 | `backend-api-error-auth.mdc` |
+| 프론트 앱 구조 | `frontend-app-architecture.mdc` |
+| 프론트 state·API | `frontend-state-api.mdc` |
+| 프론트 UI | `frontend-ui-tailwind.mdc` |

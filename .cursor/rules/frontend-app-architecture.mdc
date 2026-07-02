@@ -1,0 +1,128 @@
+---
+description: 프론트 라우팅, 스토어, 훅, 페이지 책임, 사용자 플로우
+globs: frontend/src/**/*
+alwaysApply: false
+---
+
+# Frontend App Architecture
+
+## 라우팅 (`App.tsx`)
+
+| Path | Layout | Page / Guard |
+|------|--------|--------------|
+| `/` | MainLayout | HomePage |
+| `/membership` | MainLayout | MembershipPage |
+| `/payment/complete` | MainLayout | PaymentCompletePage |
+| `/memo/:id` | MainLayout | MemoPage |
+| `/admin/login` | AdminLayout | AdminLoginPage |
+| `/admin` | AdminLayout → AdminProtectedRoute | AdminDashboardPage |
+
+**MainLayout**: `useAuthInit`, `useUsageInit`, `useMemoInit` + LeftSidebar, Navbar, AuthModal, AppToaster, ThemeToggle, `<Outlet />`
+
+**AdminLayout**: `checkAdminAccess()` → blocked면 `AdminBlockedPage` (라우터 밖), allowed면 `AdminLayoutContent` + `useAdminAuthInit`
+
+## Zustand Stores
+
+| Store | Persist | 서버 데이터 | 핵심 |
+|-------|---------|------------|------|
+| `authStore` | Yes (`auth-storage`) | user/token | `login`, `logout` |
+| `adminAuthStore` | Yes (`admin-auth-storage`) | admin/token | 별도 JWT |
+| `authModalStore` | No | — | `mode: login\|signup\|null` |
+| `usageStore` | **No** | UsageData | `setUsage`, `resetToGuest`, formatters |
+| `memoStore` | **No** | Memo[] | CRUD, `ensureMemoLoaded`, `saveMemoContent` (직렬 큐) |
+| `memoPlaybackStore` | No | — | `currentTime`, `isPlaying`, `resetPlayback` |
+| `wordSelectionStore` | No | — | `memoId`, `selectedIndices` |
+| `themeStore` | Yes | — | `light\|dark`, `applyTheme` |
+| `sidebarStore` | Yes | — | `isOpen`, width 288 |
+| `rightSidebarStore` | Yes | — | `isOpen`, `width` 260–520 |
+
+**persist 금지**: memo, usage, transcript, admin stats
+
+## Init Hooks (`MainLayout` / `AdminLayoutContent`)
+
+| Hook | 트리거 | 동작 |
+|------|--------|------|
+| `useAuthInit` | mount | token → `fetchMe` → login / logout |
+| `useUsageInit` | token 변경 | `fetchUsage` → setUsage / resetToGuest |
+| `useMemoInit` | user 변경 | `loadMemos` / setMemos([]) |
+| `useAdminAuthInit` | mount | admin token → `fetchAdminMe` |
+
+## API Layer
+
+### `lib/api.ts` — base `/api`, Bearer from `authStore`
+
+| Function | Endpoint |
+|----------|----------|
+| `register`, `login`, `fetchMe` | `/auth/*` |
+| `fetchUsage` | `GET /usage/me` |
+| `uploadAudio` | `POST /uploads/audio` (XHR + progress) |
+| `startTranscription` | `POST /transcripts` |
+| `fetchTranscript`, `fetchUpload` | GET |
+| `fetchMemos`, `fetchMemo`, `renameMemo`, `saveMemoWords`, `saveMemoContent`, `deleteMemo` | `/memos/*` |
+| `generateWordAiNote` | `POST /memos/:id/words/:wordIndex/ai-note` |
+| `preparePayment`, `completePayment` | `/payments/*` |
+| `getUploadAudioUrl`, `resolveMemoAudioUrl` | URL 헬퍼 |
+
+공유 타입: `AuthResponse`, `UploadResponse`, `TranscriptResponse`, `MemoResponse`, `UsageData`, `CreditPackId`
+
+### `lib/adminApi.ts` — base `/api/admin`
+
+`adminLogin`, `fetchAdminMe`, `fetchAdminStats`, `checkAdminAccess`
+
+## 페이지 책임
+
+### HomePage
+- 드래그·드롭·파일 선택 업로드 (audio/video)
+- 파이프라인: `uploadAudio` → `startTranscription` → `loadMemos` → `navigate(/memo/:id)`
+- `ProcessStep`: idle → uploading → transcribing → creating-memo → complete
+- `PROGRESS`: 33 → 66 → 90 → 100
+- 비로그인 → `openLogin()`, 전사 실패 시 Cloudinary 업로드됨 toast description
+- `UsageProgress` + 최근 메모 3개
+
+### MemoPage
+- `ensureMemoLoaded(id)`, 404 → `/`
+- `useMemoTranscript` — words/segments/audio hydrate
+- 제목 수정, 삭제 confirm → `/`
+- `MemoWaveformPlayer` + `memoPlaybackStore`
+- `MemoTranscriptEditor` — 단어 클릭 seek
+- `MemoPageShell` + `WordNotePanel`
+- 언마운트: `clearSelection`, `resetPlayback`
+
+### MembershipPage
+- 6개 크레딧 팩 UI (데스크톱 테이블 / 모바일 카드)
+- `usePlanPayment` → PortOne V2
+
+### PaymentCompletePage
+- `?paymentId` → `completePayment` → `setUsage`
+
+### Admin
+- `AdminLoginPage` → `/admin`
+- `AdminDashboardPage` — StatCard, recharts, RecentUsers/Payments
+- `AdminBlockedPage` — IP 차단 + clientIp
+
+## 주요 컴포넌트
+
+| Component | 역할 |
+|-----------|------|
+| `MemoWaveformPlayer` | `@arraypress/waveform-player`, seek, volume |
+| `MemoTranscriptEditor` | 단어 chip, context menu, selection |
+| `WordNotePanel` | 단어 노트 편집, AI 버튼, virtual list |
+| `AuthModal` | login/signup 폼 |
+| `LeftSidebar` | memo 목록, MemoList |
+| `Navbar` | 로그인/로그아웃, 멤버십 링크 |
+
+## Utils
+
+- `utils/transcriptToMemo.ts` — transcript content → memo words/segments 변환·동기화
+- `utils/memoExport.ts` — 메모보내기
+
+## Vite
+
+```ts
+server: { port: 1000, proxy: { '/api': 'http://localhost:1001' } }
+plugins: [react(), tailwindcss()]
+```
+
+## 의존성 (핵심)
+
+`react`, `react-router-dom`, `zustand`, `tailwindcss`, `framer-motion`, `lucide-react`, `sonner`, `@arraypress/waveform-player`, `@portone/browser-sdk`, `recharts`, `@tanstack/react-virtual`
